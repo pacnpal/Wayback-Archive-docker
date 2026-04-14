@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Audit {{ host }} @ {{ ts }}{% endblock %}
+{% block content %}
+<h2>Audit: {{ host }} <small class="mono">@ {{ ts }}</small></h2>
+<p><a href="/sites/{{host}}">← back to site</a></p>
+<p>
+  Total refs: <strong>{{ total }}</strong> ·
+  Present: <strong>{{ present }}</strong> ·
+  Missing: <strong>{{ missing|length }}</strong>
+</p>
+{% if not missing %}
+  <p class="status-ok"><strong>No missing assets.</strong></p>
+{% else %}
+<form method="post" action="/sites/{{host}}/repair">
+  <input type="hidden" name="ts" value="{{ts}}">
+  <button type="submit">Repair all {{ missing|length }}</button>
+</form>
+<table>
+  <thead><tr><th>Missing file</th><th>Referenced by</th></tr></thead>
+  <tbody>
+    {% for m in missing %}
+    <tr>
+      <td class="mono">{{ m.rel }}</td>
+      <td class="mono" style="font-size:.8rem">
+        {% for r in m.referenced_by %}{{ r }}<br>{% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

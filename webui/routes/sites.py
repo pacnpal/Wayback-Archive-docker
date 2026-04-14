@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from collections import defaultdict
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, sites_index, link_rewrite
+from .. import jobs, wayback, sites_index, link_rewrite, asset_audit
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -116,6 +116,17 @@ async def site_detail(request: Request, host: str,
             by_day[f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"].append(s)
         days_sorted = sorted(by_day.keys(), reverse=True)
 
+    audit_map = {}
+    for ts, _meta in rows_page:
+        try:
+            a = asset_audit.get_audit(jobs.OUTPUT_ROOT / host / ts)
+            total = a["total_refs"]
+            missing_n = len(a["missing"])
+            pct = 100 if total == 0 else int((total - missing_n) * 100 / total)
+            audit_map[ts] = {"total": total, "missing": missing_n, "percent": pct}
+        except Exception:
+            audit_map[ts] = None
+
     resp = templates.TemplateResponse("site_detail.html", {
         "request": request,
         "host": host,
@@ -130,6 +141,7 @@ async def site_detail(request: Request, host: str,
         "days_sorted": days_sorted,
         "from_year": from_year,
         "to_year": to_year,
+        "audit_map": audit_map,
     })
     if explicit:
         resp.set_cookie("sort_site_detail", f"{sort}:{dir}",
@@ -162,6 +174,41 @@ async def rewrite_links(host: str, ts: str = ""):
     )
     qs = "&".join(f"{k}={v}" for k, v in totals.items())
     return RedirectResponse(f"/sites/{host}?rewrite_done=1&{qs}", status_code=303)
+
+
+@router.post("/sites/{host}/audit")
+async def audit_snapshots(host: str, ts: str = ""):
+    host_dir = jobs.OUTPUT_ROOT / host
+    if not host_dir.is_dir():
+        return RedirectResponse(f"/sites/{host}", status_code=303)
+    targets = [ts] if ts else [
+        p.name for p in host_dir.iterdir()
+        if p.is_dir() and sites_index.is_snapshot_ts(p.name)
+    ]
+    for t in targets:
+        asset_audit.get_audit(host_dir / t, force=True)
+    return RedirectResponse(f"/sites/{host}", status_code=303)
+
+
+@router.get("/sites/{host}/audit/{ts}", response_class=HTMLResponse)
+async def audit_details(request: Request, host: str, ts: str):
+    path = jobs.OUTPUT_ROOT / host / ts
+    data = asset_audit.get_audit(path)
+    return templates.TemplateResponse("audit_details.html", {
+        "request": request, "host": host, "ts": ts,
+        "total": data["total_refs"], "present": data["present"],
+        "missing": data["missing"],
+    })
+
+
+@router.post("/sites/{host}/repair")
+async def repair_snapshot(host: str, ts: str = Form(...)):
+    path = jobs.OUTPUT_ROOT / host / ts
+    data = asset_audit.get_audit(path)
+    rel_paths = [m["rel"] for m in data["missing"]]
+    if rel_paths:
+        jobs.enqueue_repair(host, ts, rel_paths)
+    return RedirectResponse(f"/sites/{host}", status_code=303)
 
 
 @router.post("/sites/{host}/archive")

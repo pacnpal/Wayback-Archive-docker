@@ -69,8 +69,12 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             started_at TEXT,
             finished_at TEXT,
-            schedule_id INTEGER
+            schedule_id INTEGER,
+            repair_paths_json TEXT
         );
+        -- idempotent ALTER for existing databases
+
+        CREATE TABLE IF NOT EXISTS _col_migrate (id INTEGER PRIMARY KEY);
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -87,6 +91,11 @@ def init_db() -> None:
             created_at TEXT NOT NULL
         );
         """)
+        # Make sure repair_paths_json exists on DBs that pre-date it.
+        try:
+            c.execute("ALTER TABLE jobs ADD COLUMN repair_paths_json TEXT")
+        except sqlite3.OperationalError:
+            pass
         # Recover orphans: jobs that were mid-run when the container stopped
         # go back to pending so the worker picks them up again on startup.
         orphans = [r[0] for r in c.execute(
@@ -144,6 +153,31 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         )
         jid = cur.lastrowid
     logger.info("enqueue job=%d url=%s ts=%s", jid, target_url, resolved_ts)
+    return jid
+
+
+def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optional[dict] = None) -> int:
+    """Queue a repair job that re-fetches specific missing rel paths for an
+    existing snapshot (host/timestamp)."""
+    import json as _json
+    if not rel_paths:
+        raise ValueError("no rel_paths")
+    site_dir = str(OUTPUT_ROOT / host / timestamp)
+    log_path = str(Path(site_dir) / ".log")
+    wb = f"https://web.archive.org/web/{timestamp}/https://{host}/"
+    flags = flags or {}
+    with connect() as c:
+        cur = c.execute(
+            """INSERT INTO jobs
+               (target_url, timestamp, wayback_url, host, site_dir, log_path,
+                flags_json, status, created_at, repair_paths_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (f"https://{host}/", timestamp, wb, host, site_dir, log_path,
+             _json.dumps(flags), now_iso(), _json.dumps(rel_paths)),
+        )
+        jid = cur.lastrowid
+    logger.info("enqueue repair job=%d host=%s ts=%s paths=%d",
+                jid, host, timestamp, len(rel_paths))
     return jid
 
 
@@ -263,6 +297,21 @@ async def _run_one(job: sqlite3.Row) -> None:
     for k, v in json.loads(job["flags_json"]).items():
         if k in UPSTREAM_FLAGS and v not in (None, ""):
             env[k] = str(v)
+    # Repair mode: spawn the repair shim instead of the resume shim.
+    repair_raw = None
+    try:
+        repair_raw = job["repair_paths_json"]
+    except (KeyError, IndexError):
+        pass
+    entry_module = "webui.wayback_resume_shim"
+    if repair_raw:
+        try:
+            paths = json.loads(repair_raw)
+            if paths:
+                env["REPAIR_PATHS"] = "|".join(paths)
+                entry_module = "webui.wayback_repair_shim"
+        except Exception:
+            pass
     start_time = time.monotonic()
     with connect() as c:
         c.execute(
@@ -273,7 +322,7 @@ async def _run_one(job: sqlite3.Row) -> None:
     log_f = open(job["log_path"], "ab", buffering=0)
     try:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "webui.wayback_resume_shim",
+            sys.executable, "-m", entry_module,
             env=env, stdout=log_f, stderr=asyncio.subprocess.STDOUT,
         )
         _running[job["id"]] = proc
@@ -292,6 +341,26 @@ async def _run_one(job: sqlite3.Row) -> None:
             sites_index.refresh_index(job["host"], [Path(job["site_dir"]).name])
         except Exception:
             pass
+        # Skip auto-repair if THIS was already a repair job (avoid ping-pong).
+        try:
+            is_repair = bool(job["repair_paths_json"])
+        except (KeyError, IndexError):
+            is_repair = False
+        if not is_repair:
+            try:
+                from . import asset_audit
+                ts_name = Path(job["site_dir"]).name
+                data = asset_audit.get_audit(Path(job["site_dir"]), force=True)
+                rel_paths = [m["rel"] for m in data["missing"]]
+                if rel_paths:
+                    logger.info(
+                        "auto-repair triggered job=%d missing=%d",
+                        job["id"], len(rel_paths),
+                    )
+                    enqueue_repair(job["host"], ts_name, rel_paths)
+            except Exception as e:
+                logger.warning("auto-audit/repair failed job=%d err=%s",
+                               job["id"], e)
     with connect() as c:
         c.execute(
             "UPDATE jobs SET status=?, finished_at=? WHERE id=?",

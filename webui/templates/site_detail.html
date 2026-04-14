@@ -39,6 +39,9 @@
           onsubmit="return confirm('Rewrite absolute URLs inside HTML/CSS of ALL {{total}} snapshots of {{host}}?');">
       <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Fix links in all snapshots</button>
     </form>
+    <form method="post" action="/sites/{{host}}/audit">
+      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Audit all</button>
+    </form>
     {% endif %}
   </h3>
   {% if request.query_params.get('rewrite_done') %}
@@ -60,6 +63,7 @@
         <th>{{ lh.sort_link('ts', 'Snapshot', sort, dir, sort_extra) }}</th>
         <th style="text-align:right">{{ lh.sort_link('size', 'Size', sort, dir, sort_extra) }}</th>
         <th style="text-align:right">{{ lh.sort_link('files', 'Files', sort, dir, sort_extra) }}</th>
+        <th>Health</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -70,6 +74,18 @@
         <td class="mono ts-cell">{{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }}<br>{{ ts[8:10] }}:{{ ts[10:12] }}:{{ ts[12:14] }}</td>
         <td class="mono" style="text-align:right">{{ lh.size_human(meta.size_bytes) }}</td>
         <td class="mono" style="text-align:right">{{ meta.file_count if meta.file_count is not none else '—' }}</td>
+        {% set a = audit_map.get(ts) %}
+        <td class="mono" style="font-size:.8rem">
+          {% if a is none or a.total == 0 %}
+            —
+          {% elif a.missing == 0 %}
+            <span class="status-ok">100%</span>
+          {% else %}
+            <a href="/sites/{{host}}/audit/{{ts}}" title="click for details">
+              {{ a.percent }}% ({{ a.missing }} missing)
+            </a>
+          {% endif %}
+        </td>
         <td>
           <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
           &middot; <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
@@ -79,6 +95,14 @@
             <input type="hidden" name="ts" value="{{ts}}">
             <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">fix links</button>
           </form>
+          {% if a and a.missing > 0 %}
+          &middot;
+          <form method="post" action="/sites/{{host}}/repair" style="display:inline"
+                onsubmit="return confirm('Re-fetch {{a.missing}} missing asset(s) for this snapshot?');">
+            <input type="hidden" name="ts" value="{{ts}}">
+            <button type="submit" class="secondary" style="padding:.1rem .4rem;font-size:.8rem">repair</button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
