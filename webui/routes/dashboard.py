@@ -99,10 +99,24 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 25,
     page = min(page, pages)
     rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page,
                           status=st, sort=sort, dir=dir)
+    import json as _json
+    from .. import job_progress
+    progress = {}
+    for r in rows:
+        if r["status"] != "running":
+            continue
+        try:
+            mf = _json.loads(r["flags_json"] or "{}").get("MAX_FILES")
+            mf = int(mf) if mf and str(mf).isdigit() else None
+        except Exception:
+            mf = None
+        p = job_progress.read_progress(r["log_path"], mf)
+        if p is not None:
+            progress[r["id"]] = p
     resp = templates.TemplateResponse("_jobs_list.html", {
         "request": request, "jobs": rows, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "status": status,
-        "sort": sort, "dir": dir,
+        "sort": sort, "dir": dir, "progress": progress,
     })
     if explicit:
         resp.set_cookie("sort_jobs", f"{sort}:{dir}", max_age=60 * 60 * 24 * 365,

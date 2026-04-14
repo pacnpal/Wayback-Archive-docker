@@ -55,7 +55,14 @@
       <td class="mono ts-cell">
         {% if j.timestamp %}{{ j.timestamp[0:4] }}-{{ j.timestamp[4:6] }}-{{ j.timestamp[6:8] }}<br>{{ j.timestamp[8:10] }}:{{ j.timestamp[10:12] }}:{{ j.timestamp[12:14] }}{% else %}latest{% endif %}
       </td>
-      <td class="status-{{ j.status }}"><strong>{{ j.status }}</strong></td>
+      <td class="status-{{ j.status }}" style="min-width:7rem">
+        <strong>{{ j.status }}</strong>
+        {% if j.status == 'running' and progress.get(j.id) %}
+          {% set p = progress[j.id] %}
+          <div><small>{{ p.downloaded }}{% if p.total %}/{{ p.total }}{% endif %} · {{ p.percent }}%</small></div>
+          <div class="progress-bar"><span style="width:{{p.percent}}%"></span></div>
+        {% endif %}
+      </td>
       <td class="mono ts-cell">{% if j.started_at %}{{ j.started_at[0:10] }}<br>{{ j.started_at[11:19] }}{% else %}—{% endif %}</td>
       <td class="mono ts-cell">{% if j.finished_at %}{{ j.finished_at[0:10] }}<br>{{ j.finished_at[11:19] }}{% else %}—{% endif %}</td>
       <td>
