@@ -100,11 +100,32 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         return cur.lastrowid
 
 
-def list_jobs(limit: int = 100) -> list[sqlite3.Row]:
+def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None) -> list[sqlite3.Row]:
+    where = ""
+    args: list = []
+    if status:
+        where = "WHERE status=?"
+        args.append(status)
+    args.extend([limit, offset])
     with connect() as c:
         return c.execute(
-            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+            f"SELECT * FROM jobs {where} ORDER BY id DESC LIMIT ? OFFSET ?", args
         ).fetchall()
+
+
+def count_jobs(status: Optional[str] = None) -> int:
+    with connect() as c:
+        if status:
+            return c.execute("SELECT COUNT(*) FROM jobs WHERE status=?", (status,)).fetchone()[0]
+        return c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+
+
+def cancel_all_pending() -> int:
+    with connect() as c:
+        return c.execute(
+            "UPDATE jobs SET status='error', finished_at=? WHERE status='pending'",
+            (now_iso(),),
+        ).rowcount
 
 
 def get_job(job_id: int) -> Optional[sqlite3.Row]:

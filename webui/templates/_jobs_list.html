@@ -1,3 +1,19 @@
+<div class="jobs-toolbar" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+  <form style="display:inline" method="post" action="/jobs/cancel-all"
+        hx-post="/jobs/cancel-all" hx-confirm="Cancel ALL pending jobs?" hx-swap="none">
+    <button class="secondary" type="submit">Cancel all pending</button>
+  </form>
+  <span>
+    Filter:
+    <a href="#" hx-get="/jobs/list?per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
+    · <a href="#" hx-get="/jobs/list?status=pending&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">pending</a>
+    · <a href="#" hx-get="/jobs/list?status=running&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">running</a>
+    · <a href="#" hx-get="/jobs/list?status=ok&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">ok</a>
+    · <a href="#" hx-get="/jobs/list?status=error&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">error</a>
+  </span>
+  <span style="margin-left:auto">{{ total }} total{% if status %} ({{status}}){% endif %}</span>
+</div>
+
 <table>
   <thead><tr><th>#</th><th>URL</th><th>Snapshot</th><th>Status</th><th>Started</th><th>Finished</th><th></th></tr></thead>
   <tbody>
@@ -22,3 +38,20 @@
   {% endfor %}
   </tbody>
 </table>
+
+<nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem">
+  {% set qs = "&status=" ~ status if status else "" %}
+  <a href="#" {% if page<=1 %}aria-disabled="true"{% endif %}
+     hx-get="/jobs/list?page=1&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">« first</a>
+  <a href="#" {% if page<=1 %}aria-disabled="true"{% endif %}
+     hx-get="/jobs/list?page={{page-1}}&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">‹ prev</a>
+  <span>page {{page}} / {{pages}}</span>
+  <a href="#" {% if page>=pages %}aria-disabled="true"{% endif %}
+     hx-get="/jobs/list?page={{page+1}}&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">next ›</a>
+  <a href="#" {% if page>=pages %}aria-disabled="true"{% endif %}
+     hx-get="/jobs/list?page={{pages}}&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">last »</a>
+  &nbsp;per page:
+  {% for n in [10, 25, 50, 100] %}
+    <a href="#" hx-get="/jobs/list?page=1&per_page={{n}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">{{n}}</a>
+  {% endfor %}
+</nav>

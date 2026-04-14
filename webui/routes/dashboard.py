@@ -71,8 +71,24 @@ async def index(request: Request):
 
 
 @router.get("/jobs/list", response_class=HTMLResponse)
-async def jobs_list(request: Request):
-    return templates.TemplateResponse("_jobs_list.html", {"request": request, "jobs": jobs.list_jobs()})
+async def jobs_list(request: Request, page: int = 1, per_page: int = 25, status: str = ""):
+    page = max(1, page)
+    per_page = max(5, min(per_page, 200))
+    st = status or None
+    total = jobs.count_jobs(st)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(page, pages)
+    rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page, status=st)
+    return templates.TemplateResponse("_jobs_list.html", {
+        "request": request, "jobs": rows, "page": page, "pages": pages,
+        "per_page": per_page, "total": total, "status": status,
+    })
+
+
+@router.post("/jobs/cancel-all")
+async def cancel_all():
+    n = jobs.cancel_all_pending()
+    return RedirectResponse(f"/?cancelled={n}", status_code=303)
 
 
 def _default_flags() -> dict:
