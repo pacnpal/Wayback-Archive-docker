@@ -3,19 +3,89 @@
 {% block title %}Schedules{% endblock %}
 {% block content %}
 <h2>New schedule</h2>
-<form method="post" action="/schedules">
-  <label>Target URL <input type="text" name="target_url" required placeholder="example.com"></label>
-  <label>Cron expression <input type="text" name="cron_expr" required placeholder="0 3 * * *"></label>
-  <small>Examples: <code>0 3 * * *</code> (daily 03:00), <code>*/15 * * * *</code> (every 15 min), <code>0 0 * * 0</code> (weekly)</small>
-  <button type="submit">Create</button>
+
+<form class="schedule-builder" method="post" action="/schedules">
+  <label>Target URL
+    <input type="text" name="target_url" required placeholder="example.com">
+  </label>
+
+  <div class="sb-tabs" style="display:flex;gap:.8rem;margin:.4rem 0 .6rem;font-size:.9rem">
+    <a href="#" data-tab="simple" class="active">Simple</a>
+    <a href="#" data-tab="advanced">Advanced (raw cron)</a>
+  </div>
+
+  <div class="sb-simple">
+    <fieldset class="inline-chips">
+      <legend>Frequency</legend>
+      <label><input type="radio" name="mode" value="every-n"> every N minutes</label>
+      <label><input type="radio" name="mode" value="hourly"> hourly</label>
+      <label><input type="radio" name="mode" value="daily" checked> daily</label>
+      <label><input type="radio" name="mode" value="weekly"> weekly</label>
+      <label><input type="radio" name="mode" value="monthly"> monthly</label>
+    </fieldset>
+
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:end;margin-top:.4rem">
+      <label data-mode="every-n hourly">Minute
+        <input type="number" name="minute" min="1" max="59" value="15" style="width:6rem">
+      </label>
+      <label data-mode="daily weekly monthly">Time
+        <input type="time" name="time" value="03:00" style="width:8rem">
+      </label>
+      <fieldset class="inline-chips" data-mode="weekly">
+        <legend>Days</legend>
+        <label><input type="checkbox" name="dow" value="1"> Mon</label>
+        <label><input type="checkbox" name="dow" value="2"> Tue</label>
+        <label><input type="checkbox" name="dow" value="3"> Wed</label>
+        <label><input type="checkbox" name="dow" value="4"> Thu</label>
+        <label><input type="checkbox" name="dow" value="5"> Fri</label>
+        <label><input type="checkbox" name="dow" value="6"> Sat</label>
+        <label><input type="checkbox" name="dow" value="0"> Sun</label>
+      </fieldset>
+      <label data-mode="monthly">Day of month
+        <input type="number" name="dom" min="1" max="31" value="1" style="width:6rem">
+      </label>
+    </div>
+  </div>
+
+  <div class="sb-advanced" hidden>
+    <label>Cron expression
+      <input type="text" name="cron_expr_raw" placeholder="0 3 * * *">
+    </label>
+    <small>5 fields: minute hour day-of-month month day-of-week. <code>*/15 * * * *</code>, <code>0 3 * * *</code>, <code>0 0 * * 0</code>, …</small>
+  </div>
+
+  <input type="hidden" name="cron_expr" value="">
+  <p class="sb-preview mono" style="color:var(--pico-muted-color);font-size:.85rem;min-height:1.2rem;margin:.4rem 0 .2rem"></p>
+  <small>Times are in server time (UTC). Current: <strong>{{ server_time_utc }}</strong></small>
+  <div style="margin-top:.4rem">
+    <button type="submit">Create schedule</button>
+  </div>
 </form>
 
 <h2>Existing schedules</h2>
+{% macro humanise(cron) -%}
+  {%- set parts = cron.split() -%}
+  {%- if parts|length != 5 -%}(custom cron)
+  {%- else -%}
+    {%- set mi = parts[0] -%}{%- set hr = parts[1] -%}{%- set dom = parts[2] -%}{%- set mo = parts[3] -%}{%- set dow = parts[4] -%}
+    {%- if mi.startswith('*/') and hr=='*' and dom=='*' and mo=='*' and dow=='*' -%}every {{ mi[2:] }} minute(s)
+    {%- elif mi.isdigit() and hr=='*' and dom=='*' and mo=='*' and dow=='*' -%}every hour at :{{ '%02d'|format(mi|int) }}
+    {%- elif mi.isdigit() and hr.isdigit() and dom=='*' and mo=='*' and dow=='*' -%}every day at {{ '%02d'|format(hr|int) }}:{{ '%02d'|format(mi|int) }}
+    {%- elif mi.isdigit() and hr.isdigit() and dom=='*' and mo=='*' and (dow.replace(',','').isdigit()) -%}
+      {%- set names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] -%}
+      every {% for d in dow.split(',') %}{{ names[d|int % 7] }}{% if not loop.last %}, {% endif %}{% endfor %} at {{ '%02d'|format(hr|int) }}:{{ '%02d'|format(mi|int) }}
+    {%- elif mi.isdigit() and hr.isdigit() and dom.isdigit() and mo=='*' and dow=='*' -%}day {{ dom }} of every month at {{ '%02d'|format(hr|int) }}:{{ '%02d'|format(mi|int) }}
+    {%- else -%}(custom cron)
+    {%- endif -%}
+  {%- endif -%}
+{%- endmacro %}
+
+<div class="table-scroll">
 <table>
   <thead><tr>
     <th>{{ lh.sort_link('id', '#', sort, dir) }}</th>
     <th>{{ lh.sort_link('url', 'URL', sort, dir) }}</th>
-    <th>{{ lh.sort_link('cron', 'Cron', sort, dir) }}</th>
+    <th>{{ lh.sort_link('cron', 'When', sort, dir) }}</th>
     <th>{{ lh.sort_link('enabled', 'Enabled', sort, dir) }}</th>
     <th>{{ lh.sort_link('next', 'Next', sort, dir) }}</th>
     <th>{{ lh.sort_link('last', 'Last', sort, dir) }}</th>
@@ -26,17 +96,23 @@
     <tr>
       <td>{{ s.id }}</td>
       <td class="mono">{{ s.target_url }}</td>
-      <td class="mono">{{ s.cron_expr }}</td>
-      <td>{{ "✅" if s.enabled else "⛔" }}</td>
-      <td class="mono">{{ s.next_run_at or "—" }}</td>
-      <td class="mono">{{ s.last_run_at or "—" }}{% if s.last_job_id %} (<a href="/jobs/{{s.last_job_id}}">#{{s.last_job_id}}</a>){% endif %}</td>
+      <td>
+        <div>{{ humanise(s.cron_expr) }}</div>
+        <small class="mono" style="color:var(--pico-muted-color)">{{ s.cron_expr }}</small>
+      </td>
+      <td><span class="status-{{ 'ok' if s.enabled else 'cancelled' }}">{{ 'enabled' if s.enabled else 'disabled' }}</span></td>
+      <td class="mono ts-cell">{% if s.next_run_at %}{{ s.next_run_at[0:10] }}<br>{{ s.next_run_at[11:19] }}{% else %}—{% endif %}</td>
+      <td class="mono ts-cell">{% if s.last_run_at %}{{ s.last_run_at[0:10] }}<br>{{ s.last_run_at[11:19] }}{% if s.last_job_id %}<br><a href="/jobs/{{s.last_job_id}}">#{{s.last_job_id}}</a>{% endif %}{% else %}—{% endif %}</td>
       <td>
         <form style="display:inline" method="post" action="/schedules/{{s.id}}/toggle"><button>{{ "Disable" if s.enabled else "Enable" }}</button></form>
         <form style="display:inline" method="post" action="/schedules/{{s.id}}/run-now"><button>Run now</button></form>
-        <form style="display:inline" method="post" action="/schedules/{{s.id}}/delete"><button class="secondary">Delete</button></form>
+        <form style="display:inline" method="post" action="/schedules/{{s.id}}/delete" onsubmit="return confirm('Delete this schedule?');"><button class="secondary">Delete</button></form>
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
+
+<script src="/static/schedule_builder.js"></script>
 {% endblock %}
