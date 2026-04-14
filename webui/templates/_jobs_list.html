@@ -16,25 +16,23 @@
   <button type="button" class="secondary" onclick="jobsAct('delete',this)">Delete selected (<span class="jobs-sel-count">0</span>)</button>
   <form class="inline-filter" hx-get="/jobs/list"
         hx-target="closest div.jobs-wrap" hx-swap="innerHTML"
-        onchange="htmx.trigger(this, 'submit')"
-        style="display:flex;gap:1rem;align-items:end;flex-wrap:wrap">
+        onchange="htmx.trigger(this, 'submit')">
     <input type="hidden" name="sort" value="{{sort}}">
     <input type="hidden" name="dir" value="{{dir}}">
-    <fieldset class="inline-chips">
-      <legend>Status</legend>
-      {% for s in ['pending','running','ok','error','cancelled'] %}
-        <label><input type="checkbox" name="statuses" value="{{s}}"
-          {% if s in selected_statuses %}checked{% endif %}> {{s}}</label>
-      {% endfor %}
-    </fieldset>
-    <fieldset class="inline-chips">
-      <legend>Type</legend>
-      <label><input type="checkbox" name="types" value="archive"
-        {% if 'archive' in selected_types %}checked{% endif %}> archive</label>
-      <label><input type="checkbox" name="types" value="repair"
-        {% if 'repair' in selected_types %}checked{% endif %}> repair</label>
-    </fieldset>
-    <label class="per-page-wrap">Per page
+    <label class="filter-select"><span>Status</span>
+      <select name="statuses" multiple size="1" class="multi-combo">
+        {% for s in ['pending','running','ok','error','cancelled'] %}
+          <option value="{{s}}" {% if s in selected_statuses %}selected{% endif %}>{{s}}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="filter-select"><span>Type</span>
+      <select name="types" multiple size="1" class="multi-combo">
+        <option value="archive" {% if 'archive' in selected_types %}selected{% endif %}>archive</option>
+        <option value="repair"  {% if 'repair'  in selected_types %}selected{% endif %}>repair</option>
+      </select>
+    </label>
+    <label class="filter-select"><span>Per page</span>
       <select name="per_page">
         {% for n in sizes %}
           <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
