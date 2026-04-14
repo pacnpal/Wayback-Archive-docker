@@ -7,7 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import jobs, scheduler, log as log_mod
+import asyncio as _asyncio
+import json as _json
+from . import jobs, scheduler, log as log_mod, job_progress
 from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes
 
 BASE = Path(__file__).parent
@@ -20,11 +22,48 @@ async def lifespan(app: FastAPI):
     stop = asyncio.Event()
     t1 = asyncio.create_task(jobs.worker_loop(stop))
     t2 = asyncio.create_task(scheduler.scheduler_loop(stop))
+    t3 = asyncio.create_task(_progress_logger(stop))
     try:
         yield
     finally:
         stop.set()
-        await asyncio.gather(t1, t2, return_exceptions=True)
+        await asyncio.gather(t1, t2, t3, return_exceptions=True)
+
+
+async def _progress_logger(stop: _asyncio.Event) -> None:
+    """Every 30 s, log one line per running job: id, host, ts, counters, %."""
+    lg = log_mod.get("progress")
+    while not stop.is_set():
+        try:
+            with jobs.connect() as c:
+                rows = c.execute(
+                    "SELECT id, host, timestamp, log_path, flags_json "
+                    "FROM jobs WHERE status='running' ORDER BY id"
+                ).fetchall()
+            if rows:
+                for r in rows:
+                    try:
+                        mf = _json.loads(r["flags_json"] or "{}").get("MAX_FILES")
+                        mf = int(mf) if mf and str(mf).isdigit() else None
+                    except Exception:
+                        mf = None
+                    p = job_progress.read_progress(r["log_path"], mf)
+                    if p is None:
+                        lg.info("job=%d host=%s ts=%s (no log yet)",
+                                r["id"], r["host"], r["timestamp"])
+                    else:
+                        lg.info(
+                            "job=%d host=%s ts=%s downloaded=%d queued=%d total=%s percent=%d%%",
+                            r["id"], r["host"], r["timestamp"],
+                            p["downloaded"], p["queued"],
+                            p["total"] or "?", p["percent"],
+                        )
+        except Exception as e:
+            lg.warning("progress tick failed: %s", e)
+        try:
+            await _asyncio.wait_for(stop.wait(), timeout=30.0)
+        except _asyncio.TimeoutError:
+            pass
 
 
 app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
