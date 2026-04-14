@@ -11,22 +11,61 @@ from .. import jobs, wayback
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
-FLAG_DEFAULTS = [
-    ("OPTIMIZE_HTML", True), ("OPTIMIZE_IMAGES", False),
-    ("MINIFY_JS", False), ("MINIFY_CSS", False),
-    ("REMOVE_TRACKERS", True), ("REMOVE_ADS", True),
-    ("REMOVE_CLICKABLE_CONTACTS", True), ("REMOVE_EXTERNAL_IFRAMES", False),
-    ("REMOVE_EXTERNAL_LINKS_KEEP_ANCHORS", True),
-    ("REMOVE_EXTERNAL_LINKS_REMOVE_ANCHORS", False),
-    ("MAKE_INTERNAL_LINKS_RELATIVE", True),
-    ("MAKE_NON_WWW", True), ("MAKE_WWW", False),
-    ("KEEP_REDIRECTIONS", False),
+# (flag, label, help, default)
+FLAG_GROUPS = [
+    ("Optimization", [
+        ("OPTIMIZE_HTML", "Optimize HTML", "Clean + prettify archived HTML", True),
+        ("OPTIMIZE_IMAGES", "Optimize images", "Recompress JPEG/PNG to save space", False),
+        ("MINIFY_JS", "Minify JS", "Shrink JavaScript files", False),
+        ("MINIFY_CSS", "Minify CSS", "Shrink CSS files", False),
+    ]),
+    ("Content removal", [
+        ("REMOVE_TRACKERS", "Remove trackers", "Strip analytics/tracking scripts", True),
+        ("REMOVE_ADS", "Remove ads", "Strip common ad markup", True),
+        ("REMOVE_CLICKABLE_CONTACTS", "Disable tel/mailto links", "Keep text, strip click handler", True),
+        ("REMOVE_EXTERNAL_IFRAMES", "Remove external iframes", "Drop iframes pointing off-site", False),
+    ]),
+    ("External links", [
+        ("REMOVE_EXTERNAL_LINKS_KEEP_ANCHORS", "Neutralize external links (keep anchors)", "Make off-site links non-clickable but keep <a> text", True),
+        ("REMOVE_EXTERNAL_LINKS_REMOVE_ANCHORS", "Remove external links entirely", "Strip the <a> tags outright", False),
+    ]),
+    ("Link rewriting", [
+        ("MAKE_INTERNAL_LINKS_RELATIVE", "Make internal links relative", "Rewrite absolute → relative paths", True),
+        ("MAKE_NON_WWW", "Force non-www canonical", "Treat www. and bare host as one", True),
+        ("MAKE_WWW", "Force www canonical", "Opposite of above", False),
+        ("KEEP_REDIRECTIONS", "Keep HTTP redirections", "Don't flatten 301/302 chains", False),
+    ]),
 ]
+
+# Mutually-exclusive groups: checking one disables the others.
+EXCLUSIVE_PAIRS = [
+    ("REMOVE_EXTERNAL_LINKS_KEEP_ANCHORS", "REMOVE_EXTERNAL_LINKS_REMOVE_ANCHORS"),
+    ("MAKE_NON_WWW", "MAKE_WWW"),
+]
+
+
+def _flatten_flags():
+    return [(f, default) for _, items in FLAG_GROUPS for (f, _, _, default) in items]
+
+
+FLAG_DEFAULTS = _flatten_flags()
+
+
+def _exclusive_map() -> dict[str, str]:
+    m: dict[str, list[str]] = {}
+    for a, b in EXCLUSIVE_PAIRS:
+        m.setdefault(a, []).append(b)
+        m.setdefault(b, []).append(a)
+    return {k: ",".join(v) for k, v in m.items()}
 
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request, "flag_defaults": FLAG_DEFAULTS})
+    return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "flag_groups": FLAG_GROUPS,
+        "exclusive_map": _exclusive_map(),
+    })
 
 
 @router.get("/jobs/list", response_class=HTMLResponse)
@@ -38,6 +77,10 @@ def _collect_flags(form: dict) -> dict:
     out = {}
     for key, default in FLAG_DEFAULTS:
         out[key] = "true" if form.get(key) else "false"
+    # Enforce mutual exclusion server-side (first of pair wins if both submitted)
+    for a, b in EXCLUSIVE_PAIRS:
+        if out.get(a) == "true" and out.get(b) == "true":
+            out[b] = "false"
     mf = form.get("MAX_FILES")
     if mf and str(mf).strip().isdigit():
         out["MAX_FILES"] = str(mf).strip()

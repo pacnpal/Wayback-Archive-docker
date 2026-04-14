@@ -15,13 +15,63 @@
   </details>
   <details>
     <summary>Options</summary>
-    <fieldset>
-    {% for f, default in flag_defaults %}
-      <label><input type="checkbox" name="{{f}}" {% if default %}checked{% endif %}> {{f}}</label>
-    {% endfor %}
-      <label>MAX_FILES <input type="number" name="MAX_FILES" min="1" placeholder="unlimited" style="max-width:8rem"></label>
-    </fieldset>
+    <div class="opt-grid">
+      {% for group, items in flag_groups %}
+      <fieldset class="opt-group">
+        <legend>{{ group }}</legend>
+        {% for f, label, help, default in items %}
+          <label class="opt">
+            <input type="checkbox" name="{{f}}" {% if default %}checked{% endif %}
+                   {% if f in exclusive_map %}data-excludes="{{ exclusive_map[f] }}"{% endif %}>
+            <span class="opt-label">{{ label }}</span>
+            <small class="opt-help">{{ help }}</small>
+          </label>
+        {% endfor %}
+      </fieldset>
+      {% endfor %}
+      <fieldset class="opt-group">
+        <legend>Limits</legend>
+        <label class="opt">
+          <span class="opt-label">Max files</span>
+          <input type="number" name="MAX_FILES" min="1" placeholder="unlimited">
+          <small class="opt-help">Stop after N files (blank = unlimited)</small>
+        </label>
+      </fieldset>
+    </div>
   </details>
+  <style>
+    .opt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .opt-group { border: 1px solid var(--pico-muted-border-color); border-radius: .5rem; padding: .75rem 1rem; margin: 0; }
+    .opt-group legend { padding: 0 .4rem; font-weight: 600; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; color: var(--pico-muted-color); }
+    .opt { display: block; margin: .5rem 0; cursor: pointer; }
+    .opt input[type=checkbox] { margin-right: .4rem; }
+    .opt-label { font-size: .95rem; }
+    .opt-help { display: block; font-size: .78rem; color: var(--pico-muted-color); margin-left: 1.5rem; margin-top: .1rem; }
+    .opt input[disabled] + .opt-label, .opt input[disabled] ~ .opt-help { opacity: .5; }
+  </style>
+  <script>
+  (function() {
+    const boxes = document.querySelectorAll('input[type=checkbox][data-excludes]');
+    function refresh() {
+      // build set of checked exclusion-group names
+      const locked = {};
+      boxes.forEach(b => {
+        if (b.checked) {
+          b.dataset.excludes.split(',').forEach(n => { locked[n.trim()] = b.name; });
+        }
+      });
+      boxes.forEach(b => {
+        if (locked[b.name] && locked[b.name] !== b.name) {
+          b.checked = false; b.disabled = true;
+        } else {
+          b.disabled = false;
+        }
+      });
+    }
+    boxes.forEach(b => b.addEventListener('change', refresh));
+    refresh();
+  })();
+  </script>
   <button type="submit">Enqueue</button>
 </form>
 

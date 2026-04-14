@@ -1,0 +1,27 @@
+
+======================================================================
+Wayback-Archive Downloader
+======================================================================
+Starting URL: https://www.compaq.com
+Output directory: /app/output/www.compaq.com/19961225051932
+======================================================================
+
+[1] Downloading HTML: https://www.compaq.com
+         ✓ Downloaded (9.6 KB)
+         Processing HTML and extracting links...
+         Found 52 new links to download
+[2] Downloading Asset: image.map
+         Queue: 34 files remaining
+         🔄 Wayback failed, trying original URL: image.map...
+         ⚠️  Failed to download
+[3] Downloading HTML: ww/index.html
+         Queue: 33 files remaining
+         ⚠️  Failed to download
+[4] Downloading HTML: corporate/index.html
+         Queue: 32 files remaining
+         ⚠️  Failed to download
+[5] Downloading HTML: newsroom/index.html
+         Queue: 31 files remaining
+         ⚠️  Failed to download
+[6] Downloading HTML: productinfo/index.html
+         Queue: 30 files remaining
