@@ -30,6 +30,17 @@ app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.mount("/archives", StaticFiles(directory=jobs.OUTPUT_ROOT, html=True), name="archives")
 
+@app.get("/health")
+async def health():
+    try:
+        with jobs.connect() as c:
+            c.execute("SELECT 1").fetchone()
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+    return {"status": "ok"}
+
+
 app.include_router(dashboard.router)
 app.include_router(browser.router)
 app.include_router(schedules_routes.router)
