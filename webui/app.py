@@ -102,6 +102,20 @@ async def wayback_local(rest: str):
     return FileResponse(target)
 
 
+_FAVICON_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    b'<text y=".9em" font-size="90">\xf0\x9f\x97\x84</text></svg>'
+)
+
+
+@app.get("/favicon.svg")
+@app.get("/favicon.ico")
+async def favicon():
+    from fastapi.responses import Response
+    return Response(_FAVICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/health")
 async def health():
     try:
