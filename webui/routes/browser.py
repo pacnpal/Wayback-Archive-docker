@@ -2,9 +2,10 @@
 from __future__ import annotations
 from pathlib import Path
 
+import re
 import shutil
 from fastapi import APIRouter, HTTPException, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .. import jobs
@@ -120,14 +121,101 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
     })
 
 
+_URL_ATTR_RE = re.compile(
+    r'''(\s(?:src|href|srcset|poster|data|action|background|formaction)\s*=\s*["'])([^"']+)(["'])''',
+    re.IGNORECASE,
+)
+_CSS_URL_RE = re.compile(r'''(url\(\s*["']?)([^)"']+)(["']?\s*\))''', re.IGNORECASE)
+
+
+def _rewrite_abs(value: str, prefix: str) -> str:
+    """Prefix absolute-path refs (/foo) with `prefix` so they resolve locally.
+    Leaves schemed URLs, protocol-relative //, fragments, mailto:, /web/... untouched."""
+    v = value.strip()
+    if not v.startswith("/"):
+        return value
+    if v.startswith("//") or v.startswith("/web/") or v.startswith(prefix):
+        return value
+    return prefix.rstrip("/") + v
+
+
+def _rewrite_srcset(value: str, prefix: str) -> str:
+    out = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        bits = part.split(None, 1)
+        bits[0] = _rewrite_abs(bits[0], prefix)
+        out.append(" ".join(bits))
+    return ", ".join(out)
+
+
+def _rewrite_html(html: str, prefix: str) -> str:
+    def attr_sub(m):
+        lead, val, trail = m.group(1), m.group(2), m.group(3)
+        if lead.lower().strip().startswith("srcset"):
+            return lead + _rewrite_srcset(val, prefix) + trail
+        return lead + _rewrite_abs(val, prefix) + trail
+    html = _URL_ATTR_RE.sub(attr_sub, html)
+    html = _CSS_URL_RE.sub(
+        lambda m: m.group(1) + _rewrite_abs(m.group(2), prefix) + m.group(3), html
+    )
+    # Insert a <base> so any remaining relative refs resolve under the snapshot.
+    base_tag = f'<base href="{prefix}">'
+    if "<head" in html.lower():
+        import re as _re
+        html = _re.sub(r"(<head[^>]*>)", r"\1" + base_tag, html, count=1, flags=_re.I)
+    else:
+        html = base_tag + html
+    return html
+
+
+def _rewrite_css(css: str, prefix: str) -> str:
+    return _CSS_URL_RE.sub(
+        lambda m: m.group(1) + _rewrite_abs(m.group(2), prefix) + m.group(3), css
+    )
+
+
 @router.get("/sites/{host}/view")
 async def view(host: str, ts: str, path: str = "index.html"):
+    """Serve an archived file. Rewrites absolute-path URLs in HTML/CSS so
+    references like /images/foo.gif resolve under the snapshot instead of
+    hitting the dashboard origin and 404ing."""
     base = _host_dir(host) / ts
     f = _safe_path(base, path)
     if f.is_dir():
         f = f / "index.html"
     if not f.exists():
         raise HTTPException(404)
+    ext = f.suffix.lower()
+    prefix = f"/sites/{host}/view/{ts}/"
+    if ext in (".html", ".htm"):
+        body = f.read_text(encoding="utf-8", errors="replace")
+        return Response(_rewrite_html(body, prefix), media_type="text/html; charset=utf-8")
+    if ext == ".css":
+        body = f.read_text(encoding="utf-8", errors="replace")
+        return Response(_rewrite_css(body, prefix), media_type="text/css; charset=utf-8")
+    return FileResponse(f)
+
+
+@router.get("/sites/{host}/view/{ts}/{path:path}")
+async def view_asset(host: str, ts: str, path: str):
+    """Path-based companion to /sites/{host}/view used by rewritten HTML."""
+    base = _host_dir(host) / ts
+    f = _safe_path(base, path or "index.html")
+    if f.is_dir():
+        f = f / "index.html"
+    if not f.exists():
+        raise HTTPException(404)
+    ext = f.suffix.lower()
+    prefix = f"/sites/{host}/view/{ts}/"
+    if ext in (".html", ".htm"):
+        body = f.read_text(encoding="utf-8", errors="replace")
+        return Response(_rewrite_html(body, prefix), media_type="text/html; charset=utf-8")
+    if ext == ".css":
+        body = f.read_text(encoding="utf-8", errors="replace")
+        return Response(_rewrite_css(body, prefix), media_type="text/css; charset=utf-8")
     return FileResponse(f)
 
 
