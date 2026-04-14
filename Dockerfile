@@ -1,26 +1,35 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    OUTPUT_DIR=/app/output
+    OUTPUT_DIR=/app/output \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Cached apt — the index and .deb archives persist across builds, so unchanged
+# packages don't re-download. `rm -rf /var/lib/apt/lists/*` is skipped because
+# the cache mount is ephemeral in the final image.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
         git \
         libxml2 \
         libxslt1.1 \
         libjpeg62-turbo \
-        fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/*
+        fonts-noto-color-emoji
 
-RUN git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /tmp/wa \
- && pip install --no-cache-dir -r /tmp/wa/config/requirements.txt \
- && pip install --no-cache-dir /tmp/wa/config \
+# Upstream engine — pip wheels cached between builds.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /tmp/wa \
+ && pip install -r /tmp/wa/config/requirements.txt \
+ && pip install /tmp/wa/config \
  && rm -rf /tmp/wa
 
 COPY webui/requirements.txt /app/webui/requirements.txt
-RUN pip install --no-cache-dir -r /app/webui/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r /app/webui/requirements.txt
 
 COPY webui /app/webui
 
