@@ -5,7 +5,8 @@
 <title>{% block title %}Wayback Archive{% endblock %}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<meta name="htmx-config" content='{"noSwap": [204, 304, "4xx", "5xx"], "defaultTimeout": 0}'>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@4"></script>
 <style>
   body { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
   nav ul { display: flex; gap: 1rem; list-style: none; padding: 0; }
@@ -98,7 +99,7 @@
   });
   const wire = () => document.querySelectorAll('.multi-combo').forEach(setup);
   wire();
-  document.body.addEventListener('htmx:afterSwap', wire);
+  document.body.addEventListener('htmx:after:swap', wire);
 })();
 </script>
 </body>
