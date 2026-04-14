@@ -32,16 +32,33 @@ def _safe_path(base: Path, rel: str) -> Path:
     return p
 
 
-@router.get("/sites", response_class=HTMLResponse)
-async def sites(request: Request):
-    hosts = []
+def _all_snapshots() -> list[tuple[str, str]]:
+    out = []
     root = jobs.OUTPUT_ROOT
-    if root.exists():
-        for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
-            snaps = sorted(s.name for s in h.iterdir() if s.is_dir())
-            if snaps:
-                hosts.append((h.name, snaps))
-    return templates.TemplateResponse("sites.html", {"request": request, "hosts": hosts})
+    if not root.exists():
+        return out
+    for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+        for s in sorted((x.name for x in h.iterdir() if x.is_dir()), reverse=True):
+            out.append((h.name, s))
+    return out
+
+
+@router.get("/sites", response_class=HTMLResponse)
+async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = ""):
+    items = _all_snapshots()
+    if host:
+        items = [i for i in items if i[0] == host]
+    total = len(items)
+    per_page = max(1, min(per_page, 100000))
+    pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    slice_ = items[start:start + per_page]
+    hosts_all = sorted({h for h, _ in _all_snapshots()})
+    return templates.TemplateResponse("sites.html", {
+        "request": request, "items": slice_, "page": page, "pages": pages,
+        "per_page": per_page, "total": total, "host": host, "hosts_all": hosts_all,
+    })
 
 
 def _delete_snapshot(host: str, ts: str) -> bool:
@@ -56,17 +73,30 @@ def _delete_snapshot(host: str, ts: str) -> bool:
     return True
 
 
-@router.post("/sites/delete")
-async def sites_delete(request: Request):
+@router.post("/sites/bulk-action")
+async def sites_bulk_action(request: Request):
     form = await request.form()
-    # Values are "host/ts" strings from checkboxes
-    count = 0
-    for entry in form.getlist("snapshot"):
+    scope = form.get("scope", "selected")
+    if scope == "shown":
+        host = form.get("host") or ""
+        try:
+            page = int(form.get("page") or 1)
+            per_page = int(form.get("per_page") or 50)
+        except ValueError:
+            page, per_page = 1, 50
+        per_page = max(1, min(per_page, 100000))
+        items = _all_snapshots()
+        if host:
+            items = [i for i in items if i[0] == host]
+        slice_ = items[(page - 1) * per_page:(page - 1) * per_page + per_page]
+        entries = [f"{h}/{t}" for h, t in slice_]
+    else:
+        entries = form.getlist("snapshot")
+    for entry in entries:
         if "/" not in entry:
             continue
-        host, ts = entry.split("/", 1)
-        if _delete_snapshot(host, ts):
-            count += 1
+        h, t = entry.split("/", 1)
+        _delete_snapshot(h, t)
     return RedirectResponse("/sites", status_code=303)
 
 

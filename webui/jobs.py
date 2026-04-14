@@ -121,6 +121,37 @@ def count_jobs(status: Optional[str] = None) -> int:
         return c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
 
 
+def delete_many(ids: list[int]) -> int:
+    if not ids:
+        return 0
+    import shutil
+    with connect() as c:
+        rows = c.execute(
+            f"SELECT id, site_dir, status FROM jobs WHERE id IN ({','.join('?'*len(ids))})",
+            ids,
+        ).fetchall()
+    n = 0
+    for r in rows:
+        if r["status"] in ("pending", "running"):
+            cancel_job(r["id"])
+        p = Path(r["site_dir"])
+        if p.is_dir():
+            try:
+                shutil.rmtree(p)
+            except Exception:
+                pass
+            parent = p.parent
+            if parent.is_dir() and parent != OUTPUT_ROOT and not any(parent.iterdir()):
+                try:
+                    parent.rmdir()
+                except Exception:
+                    pass
+        with connect() as c:
+            c.execute("DELETE FROM jobs WHERE id=?", (r["id"],))
+            n += 1
+    return n
+
+
 def cancel_many(ids: list[int]) -> int:
     if not ids:
         return 0

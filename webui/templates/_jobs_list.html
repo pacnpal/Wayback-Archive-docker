@@ -1,9 +1,22 @@
-<form method="post" action="/jobs/cancel-selected" id="jobs-form"
-      hx-post="/jobs/cancel-selected" hx-confirm="Cancel selected jobs?" hx-swap="none">
+{% set qs = "&status=" ~ status if status else "" %}
+{% set sizes = [50, 100, 200, 500] | select("le", total) | list %}
+{% if total > sizes[-1] if sizes else true %}{% set _ = sizes.append(100000) %}{% endif %}
+{% if not sizes %}{% set sizes = [50] %}{% endif %}
+
+<form method="post" action="/jobs/bulk-action" id="jobs-form" hx-post="/jobs/bulk-action" hx-swap="none">
+<input type="hidden" name="action" id="jobs-action" value="cancel">
+<input type="hidden" name="scope" id="jobs-scope" value="selected">
+<input type="hidden" name="page" value="{{page}}">
+<input type="hidden" name="per_page" value="{{per_page}}">
+<input type="hidden" name="status" value="{{status}}">
+
 <div class="jobs-toolbar" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-  <button type="submit" class="secondary">Cancel selected</button>
-  <button type="button" class="secondary" hx-post="/jobs/cancel-all"
-          hx-confirm="Cancel ALL pending jobs?" hx-swap="none">Cancel all pending</button>
+  <button type="button" class="secondary" onclick="jobsAct('cancel','selected',this)">Cancel selected</button>
+  <button type="button" class="secondary" onclick="jobsAct('delete','selected',this)">Delete selected</button>
+  <span style="border-left:1px solid #888;padding-left:.5rem">
+    <button type="button" class="secondary" onclick="jobsAct('cancel','shown',this)">Cancel all shown</button>
+    <button type="button" class="secondary" onclick="jobsAct('delete','shown',this)">Delete all shown</button>
+  </span>
   <span>
     Filter:
     <a href="#" hx-get="/jobs/list?per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
@@ -24,7 +37,7 @@
   <tbody>
   {% for j in jobs %}
     <tr>
-      <td>{% if j.status in ("pending","running") %}<input type="checkbox" name="job_id" value="{{j.id}}">{% endif %}</td>
+      <td><input type="checkbox" name="job_id" value="{{j.id}}"></td>
       <td>{{ j.id }}</td>
       <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">{{ j.target_url }}</td>
       <td class="mono">{{ j.timestamp or "latest" }}</td>
@@ -42,8 +55,7 @@
   </tbody>
 </table>
 
-<nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem">
-  {% set qs = "&status=" ~ status if status else "" %}
+<nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
   <a href="#" {% if page<=1 %}aria-disabled="true"{% endif %}
      hx-get="/jobs/list?page=1&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">« first</a>
   <a href="#" {% if page<=1 %}aria-disabled="true"{% endif %}
@@ -54,8 +66,28 @@
   <a href="#" {% if page>=pages %}aria-disabled="true"{% endif %}
      hx-get="/jobs/list?page={{pages}}&per_page={{per_page}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">last »</a>
   &nbsp;per page:
-  {% for n in [10, 25, 50, 100] %}
-    <a href="#" hx-get="/jobs/list?page=1&per_page={{n}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">{{n}}</a>
+  {% for n in sizes %}
+    <a href="#" {% if n == per_page %}style="font-weight:bold"{% endif %}
+       hx-get="/jobs/list?page=1&per_page={{n}}{{qs}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
   {% endfor %}
 </nav>
 </form>
+
+<script>
+function jobsAct(action, scope, btn) {
+  const f = btn.closest('form');
+  const word = action === 'delete' ? 'DELETE' : 'CANCEL';
+  let n;
+  if (scope === 'selected') {
+    n = f.querySelectorAll('input[name=job_id]:checked').length;
+    if (!n) { alert('No jobs selected.'); return; }
+  } else {
+    n = f.querySelectorAll('input[name=job_id]').length;
+    if (!n) { alert('No jobs shown.'); return; }
+  }
+  if (!confirm(`${word} ${n} job${n===1?'':'s'}${action==='delete'?' (including archived files on disk)':''}?`)) return;
+  f.querySelector('#jobs-action').value = action;
+  f.querySelector('#jobs-scope').value = scope;
+  htmx.trigger(f, 'submit');
+}
+</script>
