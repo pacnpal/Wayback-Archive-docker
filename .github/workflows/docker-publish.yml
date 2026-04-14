@@ -53,9 +53,10 @@ jobs:
 
       - name: Sync README to Docker Hub
         uses: peter-evans/dockerhub-description@v4
+        continue-on-error: true
         with:
           username: pacnpal
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: pacnpal/wayback-archive-dashboard
           readme-filepath: ./README.md
-          short-description: ${{ github.event.repository.description }}
+          short-description: "FastAPI + htmx dashboard for GeiserX/Wayback-Archive: queue, schedule, browse, repair."
