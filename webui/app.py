@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from . import jobs, scheduler
@@ -29,6 +29,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 app.mount("/archives", StaticFiles(directory=jobs.OUTPUT_ROOT, html=True), name="archives")
+
+@app.get("/web/{rest:path}")
+async def wayback_passthrough(rest: str, request: Request):
+    """Archived HTML sometimes contains un-rewritten Wayback URLs like
+    /web/<ts>/http://example.com/img.gif. Browsers resolve those against our
+    own origin (giving 404s inside the viewer iframe). Redirect them to the
+    real Wayback Machine so the content still loads."""
+    from fastapi.responses import RedirectResponse
+    qs = request.url.query
+    target = f"https://web.archive.org/web/{rest}" + (f"?{qs}" if qs else "")
+    return RedirectResponse(target, status_code=302)
+
 
 @app.get("/health")
 async def health():
