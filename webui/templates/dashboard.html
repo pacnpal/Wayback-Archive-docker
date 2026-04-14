@@ -21,8 +21,20 @@
         <legend>{{ group }}</legend>
         {% for f, label, help, default in items %}
           <label class="opt">
-            <input type="checkbox" name="{{f}}" {% if default %}checked{% endif %}
-                   {% if f in exclusive_map %}data-excludes="{{ exclusive_map[f] }}"{% endif %}>
+            <input type="checkbox" name="{{f}}" {% if default %}checked{% endif %}>
+            <span class="opt-label">{{ label }}</span>
+            <small class="opt-help">{{ help }}</small>
+          </label>
+        {% endfor %}
+      </fieldset>
+      {% endfor %}
+      {% for title, hint, param, opts in radio_groups %}
+      <fieldset class="opt-group">
+        <legend>{{ title }}</legend>
+        <small class="opt-help" style="margin-left:0">{{ hint }}</small>
+        {% for flag, label, help, is_default in opts %}
+          <label class="opt">
+            <input type="radio" name="{{ param }}" value="{{ flag }}" {% if is_default %}checked{% endif %}>
             <span class="opt-label">{{ label }}</span>
             <small class="opt-help">{{ help }}</small>
           </label>
@@ -49,29 +61,6 @@
     .opt-help { display: block; font-size: .78rem; color: var(--pico-muted-color); margin-left: 1.5rem; margin-top: .1rem; }
     .opt input[disabled] + .opt-label, .opt input[disabled] ~ .opt-help { opacity: .5; }
   </style>
-  <script>
-  (function() {
-    const boxes = document.querySelectorAll('input[type=checkbox][data-excludes]');
-    function refresh() {
-      // build set of checked exclusion-group names
-      const locked = {};
-      boxes.forEach(b => {
-        if (b.checked) {
-          b.dataset.excludes.split(',').forEach(n => { locked[n.trim()] = b.name; });
-        }
-      });
-      boxes.forEach(b => {
-        if (locked[b.name] && locked[b.name] !== b.name) {
-          b.checked = false; b.disabled = true;
-        } else {
-          b.disabled = false;
-        }
-      });
-    }
-    boxes.forEach(b => b.addEventListener('change', refresh));
-    refresh();
-  })();
-  </script>
   <button type="submit">Enqueue</button>
 </form>
 
