@@ -1,5 +1,11 @@
 # Wayback Archive Dashboard
 
+[![GitHub release](https://img.shields.io/github/v/release/pacnpal/Wayback-Archive-Dashboard?logo=github&label=release)](https://github.com/pacnpal/Wayback-Archive-Dashboard/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/pacnpal/Wayback-Archive-Dashboard/docker-publish.yml?logo=github&label=build)](https://github.com/pacnpal/Wayback-Archive-Dashboard/actions/workflows/docker-publish.yml)
+[![Docker Hub](https://img.shields.io/docker/v/pacnpal/wayback-archive-dashboard?logo=docker&label=docker%20hub&sort=semver)](https://hub.docker.com/r/pacnpal/wayback-archive-dashboard)
+[![Docker pulls](https://img.shields.io/docker/pulls/pacnpal/wayback-archive-dashboard?logo=docker)](https://hub.docker.com/r/pacnpal/wayback-archive-dashboard)
+[![GHCR](https://img.shields.io/badge/ghcr-pacnpal%2Fwayback--archive--dashboard-2496ED?logo=github)](https://github.com/pacnpal/Wayback-Archive-Dashboard/pkgs/container/wayback-archive-dashboard)
+
 A FastAPI + htmx web dashboard around
 [GeiserX/Wayback-Archive](https://github.com/GeiserX/Wayback-Archive).
 Queue archive jobs, schedule recurring snapshots, browse/repair
