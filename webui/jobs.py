@@ -122,34 +122,18 @@ def count_jobs(status: Optional[str] = None) -> int:
 
 
 def delete_many(ids: list[int]) -> int:
+    """Delete job rows. Leaves any archived files on disk — use /sites to remove snapshots."""
     if not ids:
         return 0
-    import shutil
-    with connect() as c:
-        rows = c.execute(
-            f"SELECT id, site_dir, status FROM jobs WHERE id IN ({','.join('?'*len(ids))})",
-            ids,
-        ).fetchall()
-    n = 0
-    for r in rows:
-        if r["status"] in ("pending", "running"):
-            cancel_job(r["id"])
-        p = Path(r["site_dir"])
-        if p.is_dir():
-            try:
-                shutil.rmtree(p)
-            except Exception:
-                pass
-            parent = p.parent
-            if parent.is_dir() and parent != OUTPUT_ROOT and not any(parent.iterdir()):
-                try:
-                    parent.rmdir()
-                except Exception:
-                    pass
+    # Cancel any still-active runs first so we don't leave orphaned subprocesses.
+    for jid in ids:
         with connect() as c:
-            c.execute("DELETE FROM jobs WHERE id=?", (r["id"],))
-            n += 1
-    return n
+            r = c.execute("SELECT status FROM jobs WHERE id=?", (jid,)).fetchone()
+        if r and r["status"] in ("pending", "running"):
+            cancel_job(jid)
+    qmarks = ",".join("?" * len(ids))
+    with connect() as c:
+        return c.execute(f"DELETE FROM jobs WHERE id IN ({qmarks})", ids).rowcount
 
 
 def cancel_many(ids: list[int]) -> int:

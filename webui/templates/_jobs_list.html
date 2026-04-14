@@ -86,7 +86,7 @@ function jobsAct(action, btn) {
   const word = action === 'delete' ? 'DELETE' : 'CANCEL';
   const n = f.querySelectorAll('input[name=job_id]:checked').length;
   if (!n) { alert('No jobs selected.'); return; }
-  if (!confirm(`${word} ${n} job${n===1?'':'s'}${action==='delete'?' (including archived files on disk)':''}?`)) return;
+  if (!confirm(`${word} ${n} job${n===1?'':'s'}? (Archived files on disk are kept; manage them under Sites.)`)) return;
   f.querySelector('#jobs-action').value = action;
   htmx.trigger(f, 'submit');
 }
