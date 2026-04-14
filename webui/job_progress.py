@@ -8,7 +8,8 @@ from typing import Optional
 _STEP_RE = re.compile(r"\[(\d+)(?:\s*\(limit:\s*\d+\))?\]")
 _QUEUE_RE = re.compile(r"Queue:\s*(\d+)\s+files remaining")
 _DONE_RE = re.compile(r"Download Complete!", re.IGNORECASE)
-_TAIL_BYTES = 16384
+_HEADER_RE = re.compile(r"Wayback-Archive Downloader")
+_TAIL_BYTES = 65536
 
 
 def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[dict]:
@@ -24,6 +25,13 @@ def read_progress(log_path: str, max_files: Optional[int] = None) -> Optional[di
     except OSError:
         return None
     text = data.decode("utf-8", errors="replace")
+
+    # A job that was re-queued after a container restart will have multiple
+    # "Wayback-Archive Downloader" banners and multiple [1]..[N] sequences in
+    # the same log. Only count progress from the most recent run.
+    headers = [m.start() for m in _HEADER_RE.finditer(text)]
+    if headers:
+        text = text[headers[-1]:]
 
     downloaded = max((int(m.group(1)) for m in _STEP_RE.finditer(text)), default=0)
     queue_matches = _QUEUE_RE.findall(text)
