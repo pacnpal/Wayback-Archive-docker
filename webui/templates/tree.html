@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ host }} @ {{ ts }}{% endblock %}
+{% block content %}
+<h2>{{ host }} <small class="mono">@ {{ ts }}</small></h2>
+<p><a href="/sites/{{host}}/view?ts={{ts}}">Open rendered view →</a></p>
+<div class="tree">
+{% for entry in entries %}
+  {% if entry.is_dir %}
+    📁 <a href="/sites/{{host}}/tree?ts={{ts}}&path={{entry.rel}}">{{ entry.name }}/</a><br>
+  {% else %}
+    📄 <a href="/sites/{{host}}/edit?ts={{ts}}&path={{entry.rel}}">{{ entry.name }}</a>
+    <small>({{ entry.size }} B)</small><br>
+  {% endif %}
+{% endfor %}
+</div>
+{% if parent is not none %}<p><a href="/sites/{{host}}/tree?ts={{ts}}{% if parent %}&path={{parent}}{% endif %}">⬆ up</a></p>{% endif %}
+{% endblock %}

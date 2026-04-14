@@ -1,0 +1,15 @@
+{% if error %}
+<p class="status-error">{{ error }}</p>
+{% elif snaps %}
+<label>Pick a snapshot
+  <select name="timestamp">
+    <option value="">Latest (default)</option>
+    {% for s in snaps %}
+      <option value="{{s.timestamp}}">{{ s.timestamp[0:4] }}-{{ s.timestamp[4:6] }}-{{ s.timestamp[6:8] }} {{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</option>
+    {% endfor %}
+  </select>
+</label>
+<small>{{ snaps|length }} snapshots (HTTP 200, deduped per day)</small>
+{% else %}
+<p>No snapshots found.</p>
+{% endif %}

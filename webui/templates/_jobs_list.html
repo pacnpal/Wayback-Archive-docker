@@ -1,0 +1,24 @@
+<table>
+  <thead><tr><th>#</th><th>URL</th><th>Snapshot</th><th>Status</th><th>Started</th><th>Finished</th><th></th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td>{{ j.id }}</td>
+      <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">{{ j.target_url }}</td>
+      <td class="mono">{{ j.timestamp or "latest" }}</td>
+      <td class="status-{{ j.status }}"><strong>{{ j.status }}</strong></td>
+      <td class="mono">{{ j.started_at or "—" }}</td>
+      <td class="mono">{{ j.finished_at or "—" }}</td>
+      <td>
+        <a href="/jobs/{{j.id}}">log</a>
+        {% if j.status in ("pending","running") %}
+          · <a href="#" hx-post="/jobs/{{j.id}}/cancel" hx-swap="none">cancel</a>
+        {% endif %}
+        {% if j.status == "ok" %}
+          · <a href="/sites/{{j.host}}/view?ts={{j.timestamp}}">view</a>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,36 @@
+"""FastAPI app entrypoint."""
+from __future__ import annotations
+import asyncio
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from . import jobs, scheduler
+from .routes import dashboard, browser, schedules as schedules_routes, diff
+
+BASE = Path(__file__).parent
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    jobs.init_db()
+    stop = asyncio.Event()
+    t1 = asyncio.create_task(jobs.worker_loop(stop))
+    t2 = asyncio.create_task(scheduler.scheduler_loop(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        await asyncio.gather(t1, t2, return_exceptions=True)
+
+
+app = FastAPI(title="Wayback Archive Dashboard", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+app.mount("/archives", StaticFiles(directory=jobs.OUTPUT_ROOT, html=True), name="archives")
+
+app.include_router(dashboard.router)
+app.include_router(browser.router)
+app.include_router(schedules_routes.router)
+app.include_router(diff.router)

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }}{% endblock %}
+{% block content %}
+<h2>Job #{{ job.id }} <small class="status-{{job.status}}">{{ job.status }}</small></h2>
+<p class="mono">{{ job.wayback_url }}</p>
+<p>Output: <code>{{ job.site_dir }}</code></p>
+<pre class="log" hx-get="/jobs/{{job.id}}/log" hx-trigger="load, every 2s" hx-swap="innerHTML">loading…</pre>
+{% endblock %}

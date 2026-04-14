@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h2>New archive job</h2>
+<form method="post" action="/jobs">
+  <label>Target URL
+    <input type="url" name="target_url" required placeholder="https://example.com" id="target_url">
+  </label>
+  <details>
+    <summary>Snapshot (optional — default: latest)</summary>
+    <button type="button" hx-get="/api/snapshots"
+            hx-include="[name=target_url]"
+            hx-target="#snapshots" hx-swap="innerHTML">Fetch available snapshots</button>
+    <div id="snapshots" style="margin-top:.5rem"></div>
+  </details>
+  <details>
+    <summary>Options</summary>
+    <fieldset>
+    {% for f, default in flag_defaults %}
+      <label><input type="checkbox" name="{{f}}" {% if default %}checked{% endif %}> {{f}}</label>
+    {% endfor %}
+      <label>MAX_FILES <input type="number" name="MAX_FILES" min="1" placeholder="unlimited" style="max-width:8rem"></label>
+    </fieldset>
+  </details>
+  <button type="submit">Enqueue</button>
+</form>
+
+<h2>Jobs</h2>
+<div hx-get="/jobs/list" hx-trigger="load, every 3s" hx-swap="innerHTML">Loading…</div>
+{% endblock %}

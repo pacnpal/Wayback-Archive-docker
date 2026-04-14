@@ -3,9 +3,10 @@ services:
     build: .
     image: wayback-archive:local
     container_name: wayback-archive
-    env_file: .env
     environment:
       OUTPUT_DIR: /app/output
+    ports:
+      - "8765:8765"
     volumes:
       - ./output:/app/output
-    restart: "no"
+    restart: unless-stopped

@@ -13,12 +13,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libjpeg62-turbo \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /app
+RUN git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /tmp/wa \
+ && pip install --no-cache-dir -r /tmp/wa/config/requirements.txt \
+ && pip install --no-cache-dir /tmp/wa/config \
+ && rm -rf /tmp/wa
 
-RUN pip install --no-cache-dir -r config/requirements.txt \
- && pip install --no-cache-dir .
+COPY webui/requirements.txt /app/webui/requirements.txt
+RUN pip install --no-cache-dir -r /app/webui/requirements.txt
+
+COPY webui /app/webui
 
 RUN mkdir -p /app/output
 VOLUME ["/app/output"]
+EXPOSE 8765
 
-ENTRYPOINT ["python3", "-m", "wayback_archive.cli"]
+ENTRYPOINT ["uvicorn", "webui.app:app", "--host", "0.0.0.0", "--port", "8765"]

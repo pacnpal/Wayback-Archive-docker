@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ path }}{% endblock %}
+{% block content %}
+<h2>{{ path }} <small class="mono">{{ host }}@{{ ts }}</small></h2>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css">
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/xml/xml.min.js"></script>
+<form method="post">
+  <textarea name="content" id="ed" style="width:100%;height:60vh">{{ content }}</textarea>
+  <button type="submit">Save</button>
+  <a href="/sites/{{host}}/tree?ts={{ts}}&path={{parent}}">Cancel</a>
+</form>
+<script>
+  CodeMirror.fromTextArea(document.getElementById("ed"),
+    { lineNumbers: true, mode: "{{ mode }}", viewportMargin: Infinity });
+</script>
+{% endblock %}

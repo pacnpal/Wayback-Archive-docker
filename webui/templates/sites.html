@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Archived sites{% endblock %}
+{% block content %}
+<h2>Archived sites</h2>
+{% if not hosts %}<p>No sites yet — enqueue one from the <a href="/">dashboard</a>.</p>{% endif %}
+{% for host, snaps in hosts %}
+  <article>
+    <header><strong>{{ host }}</strong> <small>({{ snaps|length }} snapshots)</small></header>
+    <ul>
+    {% for ts in snaps %}
+      <li class="mono">
+        {{ ts }} —
+        <a href="/sites/{{host}}/view?ts={{ts}}">view</a> ·
+        <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
+      </li>
+    {% endfor %}
+    </ul>
+    {% if snaps|length >= 2 %}
+    <form method="get" action="/sites/{{host}}/diff">
+      <label>Compare
+        <select name="a">{% for ts in snaps %}<option value="{{ts}}">{{ts}}</option>{% endfor %}</select>
+        →
+        <select name="b">{% for ts in snaps %}<option value="{{ts}}">{{ts}}</option>{% endfor %}</select>
+      </label>
+      <button type="submit">Diff</button>
+    </form>
+    {% endif %}
+  </article>
+{% endfor %}
+{% endblock %}

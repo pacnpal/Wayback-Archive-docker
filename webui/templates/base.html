@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}Wayback Archive{% endblock %}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<style>
+  body { max-width: 1200px; margin: 1rem auto; padding: 0 1rem; }
+  nav ul { display: flex; gap: 1rem; list-style: none; padding: 0; }
+  .status-ok { color: #2a9d8f; } .status-error { color: #e63946; }
+  .status-running { color: #e9c46a; } .status-pending { color: #888; }
+  table { font-size: 0.9rem; }
+  .mono, code, pre { font-family: ui-monospace, monospace; }
+  pre.log { max-height: 300px; overflow: auto; background: #111; color: #ddd; padding: .5rem; }
+  .tree { font-family: ui-monospace, monospace; line-height: 1.6; }
+  .tree a { text-decoration: none; }
+  .diff-add { background: #d4edda; } .diff-del { background: #f8d7da; }
+  .diff-table { width: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  .diff-table td { padding: 0 .3rem; vertical-align: top; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<nav>
+  <ul>
+    <li><strong>🗄 Wayback Archive</strong></li>
+    <li><a href="/">Dashboard</a></li>
+    <li><a href="/sites">Sites</a></li>
+    <li><a href="/schedules">Schedules</a></li>
+  </ul>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

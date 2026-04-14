@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Schedules{% endblock %}
+{% block content %}
+<h2>New schedule</h2>
+<form method="post" action="/schedules">
+  <label>Target URL <input type="url" name="target_url" required></label>
+  <label>Cron expression <input type="text" name="cron_expr" required placeholder="0 3 * * *"></label>
+  <small>Examples: <code>0 3 * * *</code> (daily 03:00), <code>*/15 * * * *</code> (every 15 min), <code>0 0 * * 0</code> (weekly)</small>
+  <button type="submit">Create</button>
+</form>
+
+<h2>Existing schedules</h2>
+<table>
+  <thead><tr><th>#</th><th>URL</th><th>Cron</th><th>Enabled</th><th>Next</th><th>Last</th><th></th></tr></thead>
+  <tbody>
+  {% for s in schedules %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td class="mono">{{ s.target_url }}</td>
+      <td class="mono">{{ s.cron_expr }}</td>
+      <td>{{ "✅" if s.enabled else "⛔" }}</td>
+      <td class="mono">{{ s.next_run_at or "—" }}</td>
+      <td class="mono">{{ s.last_run_at or "—" }}{% if s.last_job_id %} (<a href="/jobs/{{s.last_job_id}}">#{{s.last_job_id}}</a>){% endif %}</td>
+      <td>
+        <form style="display:inline" method="post" action="/schedules/{{s.id}}/toggle"><button>{{ "Disable" if s.enabled else "Enable" }}</button></form>
+        <form style="display:inline" method="post" action="/schedules/{{s.id}}/run-now"><button>Run now</button></form>
+        <form style="display:inline" method="post" action="/schedules/{{s.id}}/delete"><button class="secondary">Delete</button></form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

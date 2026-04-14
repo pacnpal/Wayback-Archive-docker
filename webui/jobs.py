@@ -1,0 +1,178 @@
+"""Job queue (SQLite) + subprocess runner for wayback_archive CLI."""
+from __future__ import annotations
+import asyncio
+import json
+import os
+import signal
+import sqlite3
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+from . import wayback
+
+OUTPUT_ROOT = Path(os.environ.get("OUTPUT_DIR", "/app/output"))
+DB_PATH = OUTPUT_ROOT / ".dashboard.db"
+
+UPSTREAM_FLAGS = [
+    "OPTIMIZE_HTML", "OPTIMIZE_IMAGES", "MINIFY_JS", "MINIFY_CSS",
+    "REMOVE_TRACKERS", "REMOVE_ADS", "REMOVE_CLICKABLE_CONTACTS",
+    "REMOVE_EXTERNAL_IFRAMES", "REMOVE_EXTERNAL_LINKS_KEEP_ANCHORS",
+    "REMOVE_EXTERNAL_LINKS_REMOVE_ANCHORS", "MAKE_INTERNAL_LINKS_RELATIVE",
+    "MAKE_NON_WWW", "MAKE_WWW", "KEEP_REDIRECTIONS", "MAX_FILES",
+]
+
+_running: dict[int, asyncio.subprocess.Process] = {}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def connect() -> sqlite3.Connection:
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def init_db() -> None:
+    with connect() as c:
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_url TEXT NOT NULL,
+            timestamp TEXT,
+            wayback_url TEXT NOT NULL,
+            host TEXT NOT NULL,
+            site_dir TEXT NOT NULL,
+            log_path TEXT NOT NULL,
+            flags_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT,
+            schedule_id INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_url TEXT NOT NULL,
+            cron_expr TEXT NOT NULL,
+            flags_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            next_run_at TEXT,
+            last_run_at TEXT,
+            last_job_id INTEGER,
+            created_at TEXT NOT NULL
+        );
+        """)
+        # Recover orphans
+        c.execute(
+            "UPDATE jobs SET status='error', finished_at=? WHERE status='running'",
+            (now_iso(),),
+        )
+
+
+def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id: Optional[int] = None) -> int:
+    host = wayback.host_of(target_url)
+    ts = timestamp or datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    site_dir = str(OUTPUT_ROOT / host / ts)
+    log_path = str(Path(site_dir) / ".log")
+    wb = wayback.build_wayback_url(target_url, timestamp)
+    with connect() as c:
+        cur = c.execute(
+            """INSERT INTO jobs
+               (target_url, timestamp, wayback_url, host, site_dir, log_path,
+                flags_json, status, created_at, schedule_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (target_url, timestamp, wb, host, site_dir, log_path,
+             json.dumps(flags), now_iso(), schedule_id),
+        )
+        return cur.lastrowid
+
+
+def list_jobs(limit: int = 100) -> list[sqlite3.Row]:
+    with connect() as c:
+        return c.execute(
+            "SELECT * FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+
+def get_job(job_id: int) -> Optional[sqlite3.Row]:
+    with connect() as c:
+        return c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+
+
+def cancel_job(job_id: int) -> bool:
+    proc = _running.get(job_id)
+    if proc and proc.returncode is None:
+        try:
+            proc.send_signal(signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        return True
+    with connect() as c:
+        c.execute(
+            "UPDATE jobs SET status='error', finished_at=? WHERE id=? AND status='pending'",
+            (now_iso(), job_id),
+        )
+    return False
+
+
+async def _run_one(job: sqlite3.Row) -> None:
+    Path(job["site_dir"]).mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["WAYBACK_URL"] = job["wayback_url"]
+    env["OUTPUT_DIR"] = job["site_dir"]
+    for k, v in json.loads(job["flags_json"]).items():
+        if k in UPSTREAM_FLAGS and v not in (None, ""):
+            env[k] = str(v)
+    with connect() as c:
+        c.execute(
+            "UPDATE jobs SET status='running', started_at=? WHERE id=?",
+            (now_iso(), job["id"]),
+        )
+    log_f = open(job["log_path"], "ab", buffering=0)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "wayback_archive.cli",
+            env=env, stdout=log_f, stderr=asyncio.subprocess.STDOUT,
+        )
+        _running[job["id"]] = proc
+        rc = await proc.wait()
+    finally:
+        log_f.close()
+        _running.pop(job["id"], None)
+    status = "ok" if rc == 0 else "error"
+    with connect() as c:
+        c.execute(
+            "UPDATE jobs SET status=?, finished_at=? WHERE id=?",
+            (status, now_iso(), job["id"]),
+        )
+
+
+async def worker_loop(stop: asyncio.Event) -> None:
+    while not stop.is_set():
+        with connect() as c:
+            row = c.execute(
+                "SELECT * FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        try:
+            await _run_one(row)
+        except Exception as e:
+            with connect() as c:
+                c.execute(
+                    "UPDATE jobs SET status='error', finished_at=? WHERE id=?",
+                    (now_iso(), row["id"]),
+                )
+            with open(row["log_path"], "a") as f:
+                f.write(f"\n[dashboard] worker error: {e}\n")

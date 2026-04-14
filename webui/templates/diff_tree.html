@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Diff {{ host }} {{ a }} vs {{ b }}{% endblock %}
+{% block content %}
+<h2>Diff — {{ host }}</h2>
+<p class="mono">{{ a }} → {{ b }}</p>
+<h3>Added ({{ added|length }})</h3>
+<ul>{% for p in added %}<li class="mono">{{ p }}</li>{% endfor %}</ul>
+<h3>Removed ({{ removed|length }})</h3>
+<ul>{% for p in removed %}<li class="mono">{{ p }}</li>{% endfor %}</ul>
+<h3>Modified ({{ modified|length }})</h3>
+<ul>
+{% for p in modified %}
+  <li class="mono">
+    <a href="/sites/{{host}}/diff?a={{a}}&b={{b}}&path={{p}}">{{ p }}</a>
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

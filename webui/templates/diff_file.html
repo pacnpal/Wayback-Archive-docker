@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Diff {{ path }}{% endblock %}
+{% block content %}
+<h2>{{ path }}</h2>
+<p class="mono">{{ a }} → {{ b }}</p>
+{% if binary %}
+  <p>Binary or non-text file. Hashes:</p>
+  <ul><li>A: <code>{{ hash_a }}</code> ({{ size_a }} B)</li><li>B: <code>{{ hash_b }}</code> ({{ size_b }} B)</li></ul>
+{% else %}
+  {{ diff_html|safe }}
+{% endif %}
+<p><a href="/sites/{{host}}/diff?a={{a}}&b={{b}}">← back to tree diff</a></p>
+{% endblock %}
