@@ -38,6 +38,7 @@
       </a>
     {%- endmacro %}
     <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=job_id]').forEach(c=>c.checked=this.checked)"></th>
+    <th>{{ hx_sort('type', '') }}</th>
     <th>{{ hx_sort('id', '#') }}</th>
     <th>{{ hx_sort('url', 'URL') }}</th>
     <th>{{ hx_sort('ts', 'Snapshot') }}</th>
@@ -50,6 +51,9 @@
   {% for j in jobs %}
     <tr>
       <td><input type="checkbox" name="job_id" value="{{j.id}}"></td>
+      <td class="type-cell" title="{% if j.repair_paths_json %}Repair (targeted asset refetch){% else %}Archive (full crawl){% endif %}">
+        <span aria-label="{% if j.repair_paths_json %}repair{% else %}archive{% endif %}">{% if j.repair_paths_json %}↻{% else %}▼{% endif %}</span>
+      </td>
       <td>{{ j.id }}</td>
       <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">{{ j.target_url }}</td>
       <td class="mono ts-cell">

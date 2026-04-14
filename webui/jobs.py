@@ -203,6 +203,7 @@ JOB_SORT_COLS = {
     "started": "started_at",
     "finished": "finished_at",
     "host": "host",
+    "type": "CASE WHEN repair_paths_json IS NULL THEN 0 ELSE 1 END",
 }
 
 
