@@ -67,6 +67,11 @@ def _delete_snapshot(host: str, ts: str) -> bool:
     if base not in target.parents or not target.is_dir():
         return False
     shutil.rmtree(target)
+    try:
+        from .. import sites_index
+        sites_index.drop_entry(host, ts)
+    except Exception:
+        pass
     parent = target.parent
     if parent.is_dir() and not any(parent.iterdir()):
         parent.rmdir()

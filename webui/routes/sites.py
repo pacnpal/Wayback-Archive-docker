@@ -1,20 +1,21 @@
-"""Per-site (host) overview: local + remote snapshots + date picker."""
+"""Per-site (host) overview: indexed local snapshots + opt-in remote CDX."""
 from __future__ import annotations
 from pathlib import Path
 from collections import defaultdict
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback
+from .. import jobs, wayback, sites_index
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
+SORT_KEYS = {"ts", "size", "files"}
+
 
 def _local_hosts() -> list[tuple[str, int, str]]:
-    """Return (host, snapshot_count, newest_ts) tuples from disk."""
     root = jobs.OUTPUT_ROOT
     if not root.exists():
         return []
@@ -26,26 +27,42 @@ def _local_hosts() -> list[tuple[str, int, str]]:
     return out
 
 
-def _local_snapshots(host: str) -> list[str]:
-    d = jobs.OUTPUT_ROOT / host
-    if not d.is_dir():
-        return []
-    return sorted((s.name for s in d.iterdir() if s.is_dir()), reverse=True)
-
-
 @router.get("/sites", response_class=HTMLResponse)
-async def sites_index(request: Request):
+async def sites_index_route(request: Request):
     return templates.TemplateResponse("sites_index.html", {
         "request": request, "hosts": _local_hosts(),
     })
 
 
 @router.get("/sites/{host}", response_class=HTMLResponse)
-async def site_detail(request: Request, host: str, from_year: str = "", to_year: str = "",
-                       remote: int = 1):
-    local = _local_snapshots(host)
+async def site_detail(request: Request, host: str,
+                      sort: str = "ts", dir: str = "desc",
+                      page: int = 1, per_page: int = 50,
+                      remote: int = 0, from_year: str = "", to_year: str = ""):
+    idx = sites_index.get_index(host)
+    # Normalise sort + direction.
+    if sort not in SORT_KEYS:
+        sort = "ts"
+    if dir not in ("asc", "desc"):
+        dir = "desc"
+    reverse = (dir == "desc")
+    key_map = {
+        "ts": lambda kv: kv[0],
+        "size": lambda kv: kv[1].get("size_bytes", 0),
+        "files": lambda kv: kv[1].get("file_count", 0),
+    }
+    rows = sorted(idx.items(), key=key_map[sort], reverse=reverse)
+    total = len(rows)
+    per_page = max(1, min(per_page, 100000))
+    pages = max(1, (total + per_page - 1) // per_page) if total else 1
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    rows_page = rows[start:start + per_page]
+
     remote_snaps: list[dict] = []
-    remote_error = None
+    remote_error: str | None = None
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    days_sorted: list[str] = []
     if remote:
         target_url = f"https://{host}"
         try:
@@ -54,35 +71,31 @@ async def site_detail(request: Request, host: str, from_year: str = "", to_year:
                 from_year=int(from_year) if from_year.isdigit() else None,
                 to_year=int(to_year) if to_year.isdigit() else None,
                 limit=10000,
-                collapse_digits=14,  # no collapsing; show all
+                collapse_digits=14,
             )
-        except Exception as e:
+        except wayback.WaybackUnreachable as e:
             remote_error = str(e)
-
-    # Group remote snapshots by date for a calendar-ish index
-    by_day: dict[str, list[dict]] = defaultdict(list)
-    years: set[str] = set()
-    for s in remote_snaps:
-        ts = s["timestamp"]
-        day = f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"
-        by_day[day].append(s)
-        years.add(ts[0:4])
-    days_sorted = sorted(by_day.keys(), reverse=True)
-    local_set = set(local)
+        except Exception as e:
+            remote_error = f"CDX error: {e}"
+        for s in remote_snaps:
+            ts = s["timestamp"]
+            by_day[f"{ts[0:4]}-{ts[4:6]}-{ts[6:8]}"].append(s)
+        days_sorted = sorted(by_day.keys(), reverse=True)
 
     return templates.TemplateResponse("site_detail.html", {
         "request": request,
         "host": host,
-        "local": local,
-        "local_set": local_set,
+        "rows": rows_page,
+        "total": total,
+        "sort": sort, "dir": dir,
+        "page": page, "pages": pages, "per_page": per_page,
+        "remote": int(remote),
         "remote_snaps": remote_snaps,
         "remote_error": remote_error,
         "by_day": by_day,
         "days_sorted": days_sorted,
-        "years": sorted(years, reverse=True),
         "from_year": from_year,
         "to_year": to_year,
-        "remote": int(remote),
     })
 
 

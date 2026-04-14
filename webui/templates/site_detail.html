@@ -1,8 +1,31 @@
 {% extends "base.html" %}
 {% block title %}{{ host }}{% endblock %}
 {% block content %}
+
+{% macro size_human(b) -%}
+  {%- if b is none -%}—
+  {%- elif b < 1024 -%}{{ b }} B
+  {%- elif b < 1048576 -%}{{ '%.1f'|format(b/1024) }} KB
+  {%- elif b < 1073741824 -%}{{ '%.1f'|format(b/1048576) }} MB
+  {%- else -%}{{ '%.2f'|format(b/1073741824) }} GB
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro sort_link(key, label) -%}
+  {%- set next_dir = 'asc' if (sort == key and dir == 'desc') else 'desc' -%}
+  <a href="?sort={{key}}&dir={{next_dir}}&per_page={{per_page}}{% if remote %}&remote=1{% endif %}"
+     {% if sort == key %}aria-sort="{{ 'descending' if dir == 'desc' else 'ascending' }}" style="font-weight:700"{% endif %}>
+    {{ label }}{% if sort == key %} <span aria-hidden="true">{{ '▼' if dir == 'desc' else '▲' }}</span>{% endif %}
+  </a>
+{%- endmacro %}
+
+{% set sizes = [50, 100, 200, 500] | select("le", total) | list %}
+{% if not sizes %}{% set sizes = [50] %}{% endif %}
+{% if total > sizes[-1] %}{% set _ = sizes.append(100000) %}{% endif %}
+{% set qs_keep = "sort=" ~ sort ~ "&dir=" ~ dir %}
+
 <h2>{{ host }}</h2>
-<p><a href="/sites">← all sites</a> · <a href="/snapshots?host={{host}}">manage snapshots</a></p>
+<p><a href="/sites">← all sites</a> · <a href="/snapshots?host={{host}}">snapshots manager</a></p>
 
 <section>
   <h3>Archive now</h3>
@@ -13,52 +36,91 @@
         {% for s in remote_snaps %}<option value="{{ s.timestamp }}">{{ s.timestamp[0:4] }}-{{ s.timestamp[4:6] }}-{{ s.timestamp[6:8] }} {{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</option>{% endfor %}
       </datalist>
     </label>
+    {% if remote and remote_snaps %}
     <label>Pick date
-      <input type="date" id="ts-date" min="{% if remote_snaps %}{{ remote_snaps[0].timestamp[0:4] }}-{{ remote_snaps[0].timestamp[4:6] }}-{{ remote_snaps[0].timestamp[6:8] }}{% endif %}">
+      <input type="date" id="ts-date">
     </label>
+    {% endif %}
     <button type="submit">Enqueue</button>
   </form>
-  <small>Leave blank to fetch the latest snapshot.</small>
+  <small>Leave blank to fetch the latest snapshot. {% if not remote %}Load remote snapshots below to enable the snapshot picker.{% endif %}</small>
 </section>
 
 <section>
-  <h3>Local snapshots ({{ local|length }})</h3>
-  {% if not local %}<p>None archived yet.</p>{% else %}
-  <ul class="mono" style="columns: 2; -webkit-columns: 2; list-style: none; padding-left: 0">
-  {% for ts in local %}
-    <li>
-      ✅ {{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }} {{ ts[8:10] }}:{{ ts[10:12] }}
-      · <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
-      · <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
-    </li>
-  {% endfor %}
-  </ul>
+  <h3>Local snapshots <small style="font-weight:normal;color:var(--pico-muted-color)">— {{ total }}</small></h3>
+
+  {% if total == 0 %}
+  <p>None archived yet.</p>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:3rem">#</th>
+        <th>{{ sort_link('ts', 'Snapshot') }}</th>
+        <th style="text-align:right">{{ sort_link('size', 'Size') }}</th>
+        <th style="text-align:right">{{ sort_link('files', 'Files') }}</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ts, meta in rows %}
+      <tr>
+        <td class="mono">{{ loop.index + (page - 1) * per_page }}</td>
+        <td class="mono ts-cell">{{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }}<br>{{ ts[8:10] }}:{{ ts[10:12] }}:{{ ts[12:14] }}</td>
+        <td class="mono" style="text-align:right">{{ size_human(meta.size_bytes) }}</td>
+        <td class="mono" style="text-align:right">{{ meta.file_count if meta.file_count is not none else '—' }}</td>
+        <td>
+          <a href="/sites/{{host}}/view?ts={{ts}}">view</a>
+          &middot; <a href="/sites/{{host}}/tree?ts={{ts}}">browse</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
+    <a href="?{{qs_keep}}&page=1&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
+    <a href="?{{qs_keep}}&page={{page-1}}&per_page={{per_page}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
+    <span>page {{page}} / {{pages}}</span>
+    <a href="?{{qs_keep}}&page={{page+1}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
+    <a href="?{{qs_keep}}&page={{pages}}&per_page={{per_page}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
+    &nbsp;per page:
+    {% for n in sizes %}
+      <a href="?{{qs_keep}}&page=1&per_page={{n}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
+    {% endfor %}
+  </nav>
   {% endif %}
 </section>
 
 <section>
-  <h3>Available snapshots on web.archive.org</h3>
-  <form method="get" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
-    <label>From year <input type="number" name="from_year" min="1996" max="2099" value="{{from_year}}" style="width:7rem"></label>
-    <label>To year <input type="number" name="to_year" min="1996" max="2099" value="{{to_year}}" style="width:7rem"></label>
-    <label><input type="checkbox" name="remote" value="1" {% if remote %}checked{% endif %}> include remote</label>
-    <button type="submit">Refresh</button>
-    <span style="margin-left:auto">{{ remote_snaps|length }} snapshots</span>
-  </form>
-
-  {% if remote_error %}
-    <p class="status-error">CDX error: {{ remote_error }}</p>
-  {% elif not remote_snaps %}
-    <p>No remote snapshots found.</p>
+  <h3>Remote snapshots (web.archive.org)</h3>
+  {% if not remote %}
+    <p>Not loaded. Fetching the Wayback CDX index is a network call and is skipped by default.</p>
+    <form method="get" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+      <input type="hidden" name="remote" value="1">
+      <label>From year <input type="number" name="from_year" min="1996" max="2099" placeholder="any" style="width:7rem"></label>
+      <label>To year <input type="number" name="to_year" min="1996" max="2099" placeholder="any" style="width:7rem"></label>
+      <button type="submit">Load remote snapshots</button>
+    </form>
   {% else %}
-    <details open>
-      <summary>Calendar by day ({{ days_sorted|length }} days)</summary>
-      <div style="max-height:400px;overflow:auto;border:1px solid var(--pico-muted-border-color);padding:.5rem;border-radius:.5rem">
+    <form method="get" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:end">
+      <input type="hidden" name="remote" value="1">
+      <label>From year <input type="number" name="from_year" min="1996" max="2099" value="{{from_year}}" style="width:7rem"></label>
+      <label>To year <input type="number" name="to_year" min="1996" max="2099" value="{{to_year}}" style="width:7rem"></label>
+      <button type="submit">Refresh</button>
+      <a href="?" role="button" class="secondary">Hide</a>
+      <span style="margin-left:auto">{{ remote_snaps|length }} snapshots</span>
+    </form>
+    {% if remote_error %}
+      <p class="status-error" style="margin-top:.5rem">{{ remote_error }}</p>
+    {% elif not remote_snaps %}
+      <p>No remote snapshots found for this host.</p>
+    {% else %}
+      <div style="max-height:420px;overflow:auto;border:1px solid var(--pico-muted-border-color);padding:.5rem;border-radius:.5rem;margin-top:.5rem">
         {% for day in days_sorted %}
-          {% set first_ts = by_day[day][0].timestamp %}
           <div style="display:flex;gap:.5rem;align-items:baseline;padding:.15rem 0">
             <span class="mono" style="min-width:6.5rem">{{ day }}</span>
-            <span style="min-width:3rem;color:var(--pico-muted-color)">×{{ by_day[day]|length }}</span>
+            <span style="min-width:3rem;color:var(--pico-muted-color)">&times;{{ by_day[day]|length }}</span>
             {% for s in by_day[day][:5] %}
               <a href="#" class="pick-ts mono" data-ts="{{ s.timestamp }}">{{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</a>
             {% endfor %}
@@ -66,12 +128,12 @@
           </div>
         {% endfor %}
       </div>
-    </details>
+    {% endif %}
   {% endif %}
 </section>
 
+{% if remote and remote_snaps %}
 <script>
-// Wire up "pick date" + quick-link clicks to fill the timestamp input.
 const tsInput = document.getElementById('ts-input');
 const tsDate = document.getElementById('ts-date');
 const byDay = {
@@ -81,13 +143,16 @@ const byDay = {
 tsDate?.addEventListener('change', e => {
   const d = e.target.value;
   if (byDay[d]) { tsInput.value = byDay[d]; }
-  else if (d) { alert('No Wayback snapshot on ' + d + '. Nearest available:\n' +
-    (Object.keys(byDay).sort().find(k => k >= d) || Object.keys(byDay).sort().pop() || '—')); }
+  else if (d) {
+    const later = Object.keys(byDay).sort().find(k => k >= d);
+    alert('No Wayback snapshot on ' + d + '. Nearest available: ' + (later || Object.keys(byDay).sort().pop() || '—'));
+  }
 });
 document.querySelectorAll('.pick-ts').forEach(a => a.addEventListener('click', e => {
   e.preventDefault();
-  tsInput.value = e.target.dataset.ts;
+  tsInput.value = e.currentTarget.dataset.ts;
   tsInput.scrollIntoView({behavior:'smooth', block:'center'});
 }));
 </script>
+{% endif %}
 {% endblock %}

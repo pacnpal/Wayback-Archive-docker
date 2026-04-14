@@ -248,6 +248,12 @@ async def _run_one(job: sqlite3.Row) -> None:
         _cancelled.discard(job["id"])
     else:
         status = "ok" if rc == 0 else "error"
+    if status == "ok":
+        try:
+            from . import sites_index
+            sites_index.refresh_index(job["host"], [Path(job["site_dir"]).name])
+        except Exception:
+            pass
     with connect() as c:
         c.execute(
             "UPDATE jobs SET status=?, finished_at=? WHERE id=?",
