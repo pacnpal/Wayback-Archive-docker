@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxml2 \
         libxslt1.1 \
         libjpeg62-turbo \
+        fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 https://github.com/GeiserX/Wayback-Archive.git /tmp/wa \
@@ -22,6 +23,16 @@ COPY webui/requirements.txt /app/webui/requirements.txt
 RUN pip install --no-cache-dir -r /app/webui/requirements.txt
 
 COPY webui /app/webui
+
+# Render the file-cabinet emoji into PNG + ICO favicons at build time.
+RUN python -c "from PIL import Image, ImageDraw, ImageFont; \
+font_path='/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'; \
+f=ImageFont.truetype(font_path, 109); \
+sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)]; \
+im=Image.new('RGBA',(136,128),(0,0,0,0)); \
+ImageDraw.Draw(im).text((4,0), '\U0001f5c4', font=f, embedded_color=True); \
+im.resize((256,256),Image.LANCZOS).save('/app/webui/static/favicon.png'); \
+im.save('/app/webui/static/favicon.ico', format='ICO', sizes=sizes)"
 
 RUN mkdir -p /app/output
 VOLUME ["/app/output"]
