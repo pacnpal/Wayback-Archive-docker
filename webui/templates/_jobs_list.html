@@ -1,4 +1,6 @@
-{% set qs = "&status=" ~ status if status else "" %}
+{% import '_list_helpers.html' as lh %}
+{% set qs = "&sort=" ~ sort ~ "&dir=" ~ dir %}
+{% if status %}{% set qs = qs ~ "&status=" ~ status %}{% endif %}
 <span id="jobs-current-url" data-url="/jobs/list?page={{page}}&per_page={{per_page}}{{qs}}" hidden></span>
 {% set sizes = [50, 100, 200, 500] | select("le", total) | list %}
 {% if not sizes %}{% set sizes = [50] %}{% endif %}
@@ -13,20 +15,28 @@
   <button type="button" class="secondary" onclick="jobsAct('delete',this)">Delete selected (<span class="jobs-sel-count">0</span>)</button>
   <span>
     Filter:
-    <a href="#" hx-get="/jobs/list?per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
-    · <a href="#" hx-get="/jobs/list?status=pending&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">pending</a>
-    · <a href="#" hx-get="/jobs/list?status=running&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">running</a>
-    · <a href="#" hx-get="/jobs/list?status=ok&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">ok</a>
-    · <a href="#" hx-get="/jobs/list?status=error&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">error</a>
-    · <a href="#" hx-get="/jobs/list?status=cancelled&per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">cancelled</a>
+    {% set sdq = "sort=" ~ sort ~ "&dir=" ~ dir %}
+    <a href="#" hx-get="/jobs/list?per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
+    · <a href="#" hx-get="/jobs/list?status=pending&per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">pending</a>
+    · <a href="#" hx-get="/jobs/list?status=running&per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">running</a>
+    · <a href="#" hx-get="/jobs/list?status=ok&per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">ok</a>
+    · <a href="#" hx-get="/jobs/list?status=error&per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">error</a>
+    · <a href="#" hx-get="/jobs/list?status=cancelled&per_page={{per_page}}&{{sdq}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">cancelled</a>
   </span>
   <span style="margin-left:auto">{{ total }} total{% if status %} ({{status}}){% endif %}</span>
 </div>
 
 <table>
   <thead><tr>
+    {% set sort_qs %}per_page={{per_page}}{% if status %}&status={{status}}{% endif %}{% endset %}
     <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=job_id]').forEach(c=>c.checked=this.checked)"></th>
-    <th>#</th><th>URL</th><th>Snapshot</th><th>Status</th><th>Started</th><th>Finished</th><th></th>
+    <th>{{ lh.sort_link('id', '#', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('url', 'URL', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('ts', 'Snapshot', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('status', 'Status', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('started', 'Started', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('finished', 'Finished', sort, dir, sort_qs) }}</th>
+    <th></th>
   </tr></thead>
   <tbody>
   {% for j in jobs %}

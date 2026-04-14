@@ -141,7 +141,21 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
         return cur.lastrowid
 
 
-def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None) -> list[sqlite3.Row]:
+JOB_SORT_COLS = {
+    "id": "id",
+    "url": "target_url",
+    "ts": "timestamp",
+    "status": "status",
+    "started": "started_at",
+    "finished": "finished_at",
+    "host": "host",
+}
+
+
+def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None,
+              sort: str = "id", dir: str = "desc") -> list[sqlite3.Row]:
+    col = JOB_SORT_COLS.get(sort, "id")
+    direction = "ASC" if dir == "asc" else "DESC"
     where = ""
     args: list = []
     if status:
@@ -150,7 +164,8 @@ def list_jobs(limit: int = 25, offset: int = 0, status: Optional[str] = None) ->
     args.extend([limit, offset])
     with connect() as c:
         return c.execute(
-            f"SELECT * FROM jobs {where} ORDER BY id DESC LIMIT ? OFFSET ?", args
+            f"SELECT * FROM jobs {where} ORDER BY {col} {direction}, id DESC "
+            f"LIMIT ? OFFSET ?", args
         ).fetchall()
 
 

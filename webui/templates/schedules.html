@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import '_list_helpers.html' as lh %}
 {% block title %}Schedules{% endblock %}
 {% block content %}
 <h2>New schedule</h2>
@@ -11,7 +12,15 @@
 
 <h2>Existing schedules</h2>
 <table>
-  <thead><tr><th>#</th><th>URL</th><th>Cron</th><th>Enabled</th><th>Next</th><th>Last</th><th></th></tr></thead>
+  <thead><tr>
+    <th>{{ lh.sort_link('id', '#', sort, dir) }}</th>
+    <th>{{ lh.sort_link('url', 'URL', sort, dir) }}</th>
+    <th>{{ lh.sort_link('cron', 'Cron', sort, dir) }}</th>
+    <th>{{ lh.sort_link('enabled', 'Enabled', sort, dir) }}</th>
+    <th>{{ lh.sort_link('next', 'Next', sort, dir) }}</th>
+    <th>{{ lh.sort_link('last', 'Last', sort, dir) }}</th>
+    <th></th>
+  </tr></thead>
   <tbody>
   {% for s in schedules %}
     <tr>

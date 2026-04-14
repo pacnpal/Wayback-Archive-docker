@@ -72,17 +72,24 @@ async def index(request: Request):
 
 
 @router.get("/jobs/list", response_class=HTMLResponse)
-async def jobs_list(request: Request, page: int = 1, per_page: int = 25, status: str = ""):
+async def jobs_list(request: Request, page: int = 1, per_page: int = 25,
+                    status: str = "", sort: str = "id", dir: str = "desc"):
     page = max(1, page)
     per_page = max(5, min(per_page, 100000))
+    if sort not in jobs.JOB_SORT_COLS:
+        sort = "id"
+    if dir not in ("asc", "desc"):
+        dir = "desc"
     st = status or None
     total = jobs.count_jobs(st)
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(page, pages)
-    rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page, status=st)
+    rows = jobs.list_jobs(limit=per_page, offset=(page - 1) * per_page,
+                          status=st, sort=sort, dir=dir)
     return templates.TemplateResponse("_jobs_list.html", {
         "request": request, "jobs": rows, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "status": status,
+        "sort": sort, "dir": dir,
     })
 
 

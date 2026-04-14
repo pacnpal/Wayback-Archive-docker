@@ -15,11 +15,25 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
+SCHED_SORT_COLS = {
+    "id": "id", "url": "target_url", "cron": "cron_expr",
+    "enabled": "enabled", "next": "next_run_at", "last": "last_run_at",
+}
+
+
 @router.get("/schedules", response_class=HTMLResponse)
-async def list_schedules(request: Request):
+async def list_schedules(request: Request, sort: str = "id", dir: str = "desc"):
+    col = SCHED_SORT_COLS.get(sort, "id")
+    if dir not in ("asc", "desc"):
+        dir = "desc"
+    direction = "ASC" if dir == "asc" else "DESC"
     with jobs.connect() as c:
-        rows = c.execute("SELECT * FROM schedules ORDER BY id DESC").fetchall()
-    return templates.TemplateResponse("schedules.html", {"request": request, "schedules": rows})
+        rows = c.execute(
+            f"SELECT * FROM schedules ORDER BY {col} {direction}, id DESC"
+        ).fetchall()
+    return templates.TemplateResponse("schedules.html", {
+        "request": request, "schedules": rows, "sort": sort, "dir": dir,
+    })
 
 
 @router.post("/schedules")

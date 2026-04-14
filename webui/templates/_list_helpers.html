@@ -1,0 +1,16 @@
+{% macro sort_link(key, label, sort, dir, qs_extra="") -%}
+  {%- set next_dir = 'asc' if (sort == key and dir == 'desc') else 'desc' -%}
+  <a href="?sort={{key}}&dir={{next_dir}}{% if qs_extra %}&{{qs_extra}}{% endif %}"
+     {% if sort == key %}aria-sort="{{ 'descending' if dir == 'desc' else 'ascending' }}" style="font-weight:700"{% endif %}>
+    {{ label }}{% if sort == key %} <span aria-hidden="true">{{ '▼' if dir == 'desc' else '▲' }}</span>{% endif %}
+  </a>
+{%- endmacro %}
+
+{% macro size_human(b) -%}
+  {%- if b is none -%}—
+  {%- elif b < 1024 -%}{{ b }} B
+  {%- elif b < 1048576 -%}{{ '%.1f'|format(b/1024) }} KB
+  {%- elif b < 1073741824 -%}{{ '%.1f'|format(b/1048576) }} MB
+  {%- else -%}{{ '%.2f'|format(b/1073741824) }} GB
+  {%- endif -%}
+{%- endmacro %}

@@ -32,32 +32,54 @@ def _safe_path(base: Path, rel: str) -> Path:
     return p
 
 
-def _all_snapshots() -> list[tuple[str, str]]:
-    out = []
+SNAP_SORT_KEYS = {"host", "ts", "size", "files"}
+
+
+def _all_snapshots() -> list[dict]:
+    """Return [{host, ts, size_bytes, file_count, mtime}] for every snapshot."""
+    from .. import sites_index
+    out: list[dict] = []
     root = jobs.OUTPUT_ROOT
     if not root.exists():
         return out
-    for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
-        for s in sorted((x.name for x in h.iterdir() if x.is_dir()), reverse=True):
-            out.append((h.name, s))
+    for h in (p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+        idx = sites_index.get_index(h.name)
+        for ts, meta in idx.items():
+            out.append({"host": h.name, "ts": ts,
+                        "size_bytes": meta.get("size_bytes", 0),
+                        "file_count": meta.get("file_count", 0)})
     return out
 
 
 @router.get("/snapshots", response_class=HTMLResponse)
-async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = ""):
+async def sites(request: Request, page: int = 1, per_page: int = 50, host: str = "",
+                sort: str = "ts", dir: str = "desc"):
+    if sort not in SNAP_SORT_KEYS:
+        sort = "ts"
+    if dir not in ("asc", "desc"):
+        dir = "desc"
+    reverse = (dir == "desc")
     items = _all_snapshots()
     if host:
-        items = [i for i in items if i[0] == host]
+        items = [i for i in items if i["host"] == host]
+    key_map = {
+        "host": lambda r: (r["host"], r["ts"]),
+        "ts": lambda r: (r["ts"], r["host"]),
+        "size": lambda r: r["size_bytes"],
+        "files": lambda r: r["file_count"],
+    }
+    items.sort(key=key_map[sort], reverse=reverse)
     total = len(items)
     per_page = max(1, min(per_page, 100000))
     pages = max(1, (total + per_page - 1) // per_page) if total else 1
     page = max(1, min(page, pages))
     start = (page - 1) * per_page
     slice_ = items[start:start + per_page]
-    hosts_all = sorted({h for h, _ in _all_snapshots()})
+    hosts_all = sorted({r["host"] for r in _all_snapshots()})
     return templates.TemplateResponse("snapshots.html", {
         "request": request, "items": slice_, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "host": host, "hosts_all": hosts_all,
+        "sort": sort, "dir": dir,
     })
 
 

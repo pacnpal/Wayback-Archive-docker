@@ -27,10 +27,25 @@ def _local_hosts() -> list[tuple[str, int, str]]:
     return out
 
 
+HOSTS_SORT_KEYS = {"host", "count", "newest"}
+
+
 @router.get("/sites", response_class=HTMLResponse)
-async def sites_index_route(request: Request):
+async def sites_index_route(request: Request, sort: str = "host", dir: str = "asc"):
+    if sort not in HOSTS_SORT_KEYS:
+        sort = "host"
+    if dir not in ("asc", "desc"):
+        dir = "asc"
+    reverse = (dir == "desc")
+    hosts = _local_hosts()
+    key_map = {
+        "host": lambda t: t[0],
+        "count": lambda t: t[1],
+        "newest": lambda t: t[2],
+    }
+    hosts.sort(key=key_map[sort], reverse=reverse)
     return templates.TemplateResponse("sites_index.html", {
-        "request": request, "hosts": _local_hosts(),
+        "request": request, "hosts": hosts, "sort": sort, "dir": dir,
     })
 
 

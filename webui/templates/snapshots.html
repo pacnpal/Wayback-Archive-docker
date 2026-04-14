@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import '_list_helpers.html' as lh %}
 {% block title %}Snapshots{% endblock %}
 {% block content %}
 <h2>Snapshots</h2>
@@ -10,6 +11,8 @@
 {% if not sizes %}{% set sizes = [50] %}{% endif %}
 {% if total > sizes[-1] %}{% set _ = sizes.append(100000) %}{% endif %}
 {% set qs_host = ("&host=" ~ host) if host else "" %}
+{% set qs_keep = "sort=" ~ sort ~ "&dir=" ~ dir %}
+{% set sort_qs %}per_page={{per_page}}{% if host %}&host={{host}}{% endif %}{% endset %}
 
 <form method="post" action="/snapshots/bulk-action"
       onsubmit="return sitesAct(this, event);">
@@ -18,7 +21,7 @@
 <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
   <button type="submit" class="secondary">Delete selected (<span id="sites-sel-count">0</span>)</button>
   <label>Host:
-    <select onchange="location.href='/snapshots?per_page={{per_page}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
+    <select onchange="location.href='/snapshots?per_page={{per_page}}&{{qs_keep}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
       <option value="">all ({{ hosts_all|length }})</option>
       {% for h in hosts_all %}<option value="{{h}}" {% if h==host %}selected{% endif %}>{{h}}</option>{% endfor %}
     </select>
@@ -29,17 +32,23 @@
 <table>
   <thead><tr>
     <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=snapshot]').forEach(c=>c.checked=this.checked)"></th>
-    <th>Host</th><th>Snapshot</th><th></th>
+    <th>{{ lh.sort_link('host', 'Host', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('ts', 'Snapshot', sort, dir, sort_qs) }}</th>
+    <th style="text-align:right">{{ lh.sort_link('size', 'Size', sort, dir, sort_qs) }}</th>
+    <th style="text-align:right">{{ lh.sort_link('files', 'Files', sort, dir, sort_qs) }}</th>
+    <th>Actions</th>
   </tr></thead>
   <tbody>
-    {% for h, ts in items %}
+    {% for r in items %}
     <tr>
-      <td><input type="checkbox" name="snapshot" value="{{h}}/{{ts}}"></td>
-      <td class="mono">{{ h }}</td>
-      <td class="mono ts-cell">{{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }}<br>{{ ts[8:10] }}:{{ ts[10:12] }}:{{ ts[12:14] }}</td>
+      <td><input type="checkbox" name="snapshot" value="{{r.host}}/{{r.ts}}"></td>
+      <td class="mono">{{ r.host }}</td>
+      <td class="mono ts-cell">{{ r.ts[0:4] }}-{{ r.ts[4:6] }}-{{ r.ts[6:8] }}<br>{{ r.ts[8:10] }}:{{ r.ts[10:12] }}:{{ r.ts[12:14] }}</td>
+      <td class="mono" style="text-align:right">{{ lh.size_human(r.size_bytes) }}</td>
+      <td class="mono" style="text-align:right">{{ r.file_count }}</td>
       <td>
-        <a href="/sites/{{h}}/view?ts={{ts}}">view</a> ·
-        <a href="/sites/{{h}}/tree?ts={{ts}}">browse</a>
+        <a href="/sites/{{r.host}}/view?ts={{r.ts}}">view</a> ·
+        <a href="/sites/{{r.host}}/tree?ts={{r.ts}}">browse</a>
       </td>
     </tr>
     {% endfor %}
@@ -47,14 +56,14 @@
 </table>
 
 <nav class="pager" style="display:flex;gap:.4rem;align-items:center;justify-content:center;margin-top:.5rem;flex-wrap:wrap">
-  <a href="/snapshots?page=1&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
-  <a href="/snapshots?page={{page-1}}&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
+  <a href="/snapshots?{{qs_keep}}&page=1&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>« first</a>
+  <a href="/snapshots?{{qs_keep}}&page={{page-1}}&per_page={{per_page}}{{qs_host}}" {% if page<=1 %}aria-disabled="true"{% endif %}>‹ prev</a>
   <span>page {{page}} / {{pages}}</span>
-  <a href="/snapshots?page={{page+1}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
-  <a href="/snapshots?page={{pages}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
+  <a href="/snapshots?{{qs_keep}}&page={{page+1}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>next ›</a>
+  <a href="/snapshots?{{qs_keep}}&page={{pages}}&per_page={{per_page}}{{qs_host}}" {% if page>=pages %}aria-disabled="true"{% endif %}>last »</a>
   &nbsp;per page:
   {% for n in sizes %}
-    <a href="/snapshots?page=1&per_page={{n}}{{qs_host}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
+    <a href="/snapshots?{{qs_keep}}&page=1&per_page={{n}}{{qs_host}}" {% if n == per_page %}style="font-weight:bold"{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</a>
   {% endfor %}
 </nav>
 </form>
