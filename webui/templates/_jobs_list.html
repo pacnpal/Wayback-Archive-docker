@@ -9,8 +9,8 @@
 <input type="hidden" name="scope" value="selected">
 
 <div class="jobs-toolbar" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-  <button type="button" class="secondary" onclick="jobsAct('cancel',this)">Cancel selected</button>
-  <button type="button" class="secondary" onclick="jobsAct('delete',this)">Delete selected</button>
+  <button type="button" class="secondary" onclick="jobsAct('cancel',this)">Cancel selected (<span class="jobs-sel-count">0</span>)</button>
+  <button type="button" class="secondary" onclick="jobsAct('delete',this)">Delete selected (<span class="jobs-sel-count">0</span>)</button>
   <span>
     Filter:
     <a href="#" hx-get="/jobs/list?per_page={{per_page}}" hx-target="closest div.jobs-wrap" hx-swap="innerHTML">all</a>
@@ -70,6 +70,17 @@
 </form>
 
 <script>
+function jobsRefreshCount() {
+  const f = document.getElementById('jobs-form');
+  if (!f) return;
+  const n = f.querySelectorAll('input[name=job_id]:checked').length;
+  f.querySelectorAll('.jobs-sel-count').forEach(s => s.textContent = n);
+}
+document.getElementById('jobs-form')?.addEventListener('change', e => {
+  if (e.target.matches('input[type=checkbox]')) jobsRefreshCount();
+});
+jobsRefreshCount();
+
 function jobsAct(action, btn) {
   const f = btn.closest('form');
   const word = action === 'delete' ? 'DELETE' : 'CANCEL';

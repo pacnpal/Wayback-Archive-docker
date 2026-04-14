@@ -16,7 +16,7 @@
 <input type="hidden" name="scope" value="selected">
 
 <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
-  <button type="submit" class="secondary">Delete selected</button>
+  <button type="submit" class="secondary">Delete selected (<span id="sites-sel-count">0</span>)</button>
   <label>Host:
     <select onchange="location.href='/sites?per_page={{per_page}}'+(this.value?('&host='+encodeURIComponent(this.value)):'')">
       <option value="">all ({{ hosts_all|length }})</option>
@@ -60,6 +60,17 @@
 </form>
 
 <script>
+(function(){
+  const f = document.querySelector('form[action="/sites/bulk-action"]');
+  if (!f) return;
+  const refresh = () => {
+    const n = f.querySelectorAll('input[name=snapshot]:checked').length;
+    document.getElementById('sites-sel-count').textContent = n;
+  };
+  f.addEventListener('change', e => { if (e.target.matches('input[type=checkbox]')) refresh(); });
+  refresh();
+})();
+
 function sitesAct(form, ev) {
   const n = form.querySelectorAll('input[name=snapshot]:checked').length;
   if (!n) { ev.preventDefault(); alert('No snapshots selected.'); return false; }
