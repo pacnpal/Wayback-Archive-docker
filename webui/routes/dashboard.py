@@ -75,15 +75,21 @@ async def jobs_list(request: Request):
     return templates.TemplateResponse("_jobs_list.html", {"request": request, "jobs": jobs.list_jobs()})
 
 
-def _collect_flags(form: dict) -> dict:
+def _default_flags() -> dict:
+    out = {key: ("true" if default else "false") for key, default in FLAG_DEFAULTS}
+    return out
+
+
+def _collect_flags(form: dict, *, submitted_form: bool = True) -> dict:
+    """Build flag dict from form. If submitted_form=False, return defaults only."""
+    if not submitted_form:
+        return _default_flags()
     out = {}
-    # Plain checkboxes
     for key, default in FLAG_DEFAULTS:
         if key in RADIO_FLAGS:
-            out[key] = "false"  # reset; radio resolves below
+            out[key] = "false"
         else:
             out[key] = "true" if form.get(key) else "false"
-    # Radio groups: the selected value names which flag (if any) goes true
     for _, _, param, _ in RADIO_GROUPS:
         chosen = form.get(param) or ""
         if chosen and chosen in RADIO_FLAGS:
@@ -124,7 +130,7 @@ async def create_bulk(request: Request):
         )
     except Exception as e:
         raise HTTPException(502, f"CDX error: {e}")
-    flags = _collect_flags(form)
+    flags = _default_flags()
     count = 0
     for s in snaps[:cap]:
         try:
