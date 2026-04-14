@@ -64,6 +64,31 @@
   <button type="submit">Enqueue</button>
 </form>
 
+<hr>
+<details>
+  <summary><strong>Bulk archive — grab many snapshots of one URL</strong></summary>
+  <form method="post" action="/jobs/bulk" style="margin-top:.5rem">
+    <label>Target URL <input type="text" name="target_url" required placeholder="example.com"></label>
+    <div class="opt-grid">
+      <fieldset class="opt-group">
+        <legend>Sampling</legend>
+        <label class="opt"><input type="radio" name="granularity" value="year" checked> <span class="opt-label">One per year</span><small class="opt-help">Collapse to first snapshot per year</small></label>
+        <label class="opt"><input type="radio" name="granularity" value="month"> <span class="opt-label">One per month</span></label>
+        <label class="opt"><input type="radio" name="granularity" value="day"> <span class="opt-label">One per day</span></label>
+        <label class="opt"><input type="radio" name="granularity" value="every"> <span class="opt-label">Every snapshot</span><small class="opt-help">No collapsing — capped by "Max"</small></label>
+      </fieldset>
+      <fieldset class="opt-group">
+        <legend>Range</legend>
+        <label class="opt"><span class="opt-label">From year</span><input type="number" name="from_year" min="1996" max="2099" placeholder="any"></label>
+        <label class="opt"><span class="opt-label">To year</span><input type="number" name="to_year" min="1996" max="2099" placeholder="any"></label>
+        <label class="opt"><span class="opt-label">Max jobs</span><input type="number" name="max_count" min="1" max="500" value="50"></label>
+      </fieldset>
+    </div>
+    <small>Uses the default option flags. Edit individual jobs afterward if needed.</small><br>
+    <button type="submit">Enqueue bulk</button>
+  </form>
+</details>
+
 <h2>Jobs</h2>
 <div hx-get="/jobs/list" hx-trigger="load, every 3s" hx-swap="innerHTML">Loading…</div>
 {% endblock %}

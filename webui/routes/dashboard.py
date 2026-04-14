@@ -94,6 +94,47 @@ def _collect_flags(form: dict) -> dict:
     return out
 
 
+GRANULARITY = {"year": 4, "month": 6, "day": 8, "every": 14}
+
+
+@router.post("/jobs/bulk")
+async def create_bulk(request: Request):
+    form = dict(await request.form())
+    target = form.get("target_url", "").strip()
+    if not target:
+        raise HTTPException(400, "target_url required")
+    if "://" not in target:
+        target = "https://" + target
+    gran = form.get("granularity", "year")
+    digits = GRANULARITY.get(gran, 4)
+    fy = form.get("from_year")
+    ty = form.get("to_year")
+    try:
+        cap = int(form.get("max_count") or 50)
+    except ValueError:
+        cap = 50
+    cap = max(1, min(cap, 500))
+    try:
+        snaps = wayback.list_snapshots(
+            target,
+            from_year=int(fy) if fy and fy.isdigit() else None,
+            to_year=int(ty) if ty and ty.isdigit() else None,
+            limit=cap,
+            collapse_digits=digits,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"CDX error: {e}")
+    flags = _collect_flags(form)
+    count = 0
+    for s in snaps[:cap]:
+        try:
+            jobs.enqueue(target, s["timestamp"], flags)
+            count += 1
+        except Exception:
+            continue
+    return RedirectResponse(f"/?bulk={count}", status_code=303)
+
+
 @router.post("/jobs")
 async def create_job(request: Request):
     form = dict(await request.form())

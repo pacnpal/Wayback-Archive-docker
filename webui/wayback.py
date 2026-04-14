@@ -40,8 +40,8 @@ def build_wayback_url(target_url: str, timestamp: Optional[str] = None) -> str:
     return f"https://web.archive.org/web/{ts}/{target_url}"
 
 
-def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500) -> list[dict]:
-    key = f"{url}|{from_year}|{to_year}|{limit}"
+def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500, collapse_digits: int = 8) -> list[dict]:
+    key = f"{url}|{from_year}|{to_year}|{limit}|{collapse_digits}"
     now = time.time()
     if key in _CACHE and now - _CACHE[key][0] < _TTL:
         return _CACHE[key][1]
@@ -52,7 +52,7 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
         "limit": str(limit),
         "fl": "timestamp,original,statuscode,mimetype,digest",
         "filter": "statuscode:200",
-        "collapse": "timestamp:8",
+        "collapse": f"timestamp:{collapse_digits}",
     }
     if from_year:
         params["from"] = str(from_year)
