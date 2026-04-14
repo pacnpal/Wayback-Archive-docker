@@ -34,10 +34,12 @@
       <td><input type="checkbox" name="job_id" value="{{j.id}}"></td>
       <td>{{ j.id }}</td>
       <td class="mono" style="max-width:420px;overflow:hidden;text-overflow:ellipsis">{{ j.target_url }}</td>
-      <td class="mono">{{ j.timestamp or "latest" }}</td>
+      <td class="mono ts-cell">
+        {% if j.timestamp %}{{ j.timestamp[0:4] }}-{{ j.timestamp[4:6] }}-{{ j.timestamp[6:8] }}<br>{{ j.timestamp[8:10] }}:{{ j.timestamp[10:12] }}:{{ j.timestamp[12:14] }}{% else %}latest{% endif %}
+      </td>
       <td class="status-{{ j.status }}"><strong>{{ j.status }}</strong></td>
-      <td class="mono">{{ j.started_at or "—" }}</td>
-      <td class="mono">{{ j.finished_at or "—" }}</td>
+      <td class="mono ts-cell">{% if j.started_at %}{{ j.started_at[0:10] }}<br>{{ j.started_at[11:19] }}{% else %}—{% endif %}</td>
+      <td class="mono ts-cell">{% if j.finished_at %}{{ j.finished_at[0:10] }}<br>{{ j.finished_at[11:19] }}{% else %}—{% endif %}</td>
       <td>
         <a href="/jobs/{{j.id}}">log</a>
         {% if j.status == "ok" %}

@@ -36,7 +36,7 @@
     <tr>
       <td><input type="checkbox" name="snapshot" value="{{h}}/{{ts}}"></td>
       <td class="mono">{{ h }}</td>
-      <td class="mono">{{ ts }}</td>
+      <td class="mono ts-cell">{{ ts[0:4] }}-{{ ts[4:6] }}-{{ ts[6:8] }}<br>{{ ts[8:10] }}:{{ ts[10:12] }}:{{ ts[12:14] }}</td>
       <td>
         <a href="/sites/{{h}}/view?ts={{ts}}">view</a> ·
         <a href="/sites/{{h}}/tree?ts={{ts}}">browse</a>
