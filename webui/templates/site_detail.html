@@ -21,14 +21,12 @@
         {% for s in remote_snaps %}<option value="{{ s.timestamp }}">{{ s.timestamp[0:4] }}-{{ s.timestamp[4:6] }}-{{ s.timestamp[6:8] }} {{ s.timestamp[8:10] }}:{{ s.timestamp[10:12] }}</option>{% endfor %}
       </datalist>
     </label>
-    {% if remote and remote_snaps %}
     <label>Pick date
-      <input type="date" id="ts-date">
+      <input type="date" id="ts-date" min="1996-01-01" max="2099-12-31">
     </label>
-    {% endif %}
     <button type="submit">Enqueue</button>
   </form>
-  <small>Leave blank to fetch the latest snapshot. {% if not remote %}Load remote snapshots below to enable the snapshot picker.{% endif %}</small>
+  <small>Leave blank to fetch the latest snapshot. Pick a date to jump to that day (Wayback will return the closest available snapshot).</small>
 </section>
 
 <section>
@@ -172,21 +170,24 @@
   {% endif %}
 </section>
 
-{% if remote and remote_snaps %}
 <script>
 const tsInput = document.getElementById('ts-input');
 const tsDate = document.getElementById('ts-date');
+{% if remote and remote_snaps %}
 const byDay = {
   {% for day in days_sorted %}"{{ day }}": "{{ by_day[day][0].timestamp }}"{% if not loop.last %},{% endif %}
   {% endfor %}
 };
+{% else %}
+const byDay = null;
+{% endif %}
 tsDate?.addEventListener('change', e => {
   const d = e.target.value;
-  if (byDay[d]) { tsInput.value = byDay[d]; }
-  else if (d) {
-    const later = Object.keys(byDay).sort().find(k => k >= d);
-    alert('No Wayback snapshot on ' + d + '. Nearest available: ' + (later || Object.keys(byDay).sort().pop() || '—'));
-  }
+  if (!d) return;
+  if (byDay && byDay[d]) { tsInput.value = byDay[d]; return; }
+  // No per-day index (remote not loaded); fall back to a noon timestamp so
+  // Wayback resolves the closest snapshot on that calendar day.
+  tsInput.value = d.replace(/-/g, '') + '120000';
 });
 document.querySelectorAll('.pick-ts').forEach(a => a.addEventListener('click', e => {
   e.preventDefault();
@@ -194,5 +195,4 @@ document.querySelectorAll('.pick-ts').forEach(a => a.addEventListener('click', e
   tsInput.scrollIntoView({behavior:'smooth', block:'center'});
 }));
 </script>
-{% endif %}
 {% endblock %}

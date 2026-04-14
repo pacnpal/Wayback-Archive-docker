@@ -142,10 +142,10 @@ async def site_detail(request: Request, host: str,
     for ts, _meta in rows_page:
         try:
             a = asset_audit.get_audit(jobs.OUTPUT_ROOT / host / ts)
-            total = a["total_refs"]
+            refs_total = a["total_refs"]
             missing_n = len(a["missing"])
-            pct = 100 if total == 0 else int((total - missing_n) * 100 / total)
-            audit_map[ts] = {"total": total, "missing": missing_n, "percent": pct}
+            pct = 100 if refs_total == 0 else int((refs_total - missing_n) * 100 / refs_total)
+            audit_map[ts] = {"total": refs_total, "missing": missing_n, "percent": pct}
         except Exception:
             audit_map[ts] = None
 
