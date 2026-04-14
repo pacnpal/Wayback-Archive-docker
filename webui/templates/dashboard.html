@@ -114,44 +114,6 @@
 </details>
 
 <h2>Jobs</h2>
-<div class="jobs-wrap" hx-get="/jobs/list" hx-trigger="load, every 5s"
-     hx-swap="innerHTML" hx-sync="this:replace">Loading…</div>
-<script>
-(function() {
-  const wrap = document.querySelector('.jobs-wrap');
-  let saved = null;
-  // Save/restore state across every auto-refresh swap: row selections AND
-  // which filter dropdown (if any) was open.
-  let openComboKey = null;
-  wrap.addEventListener('htmx:beforeSwap', () => {
-    saved = new Set(
-      [...wrap.querySelectorAll('input[name=job_id]:checked')].map(c => c.value)
-    );
-    const openCombo = wrap.querySelector('.multi-combo.open');
-    openComboKey = openCombo
-      ? (openCombo.querySelector('input[name]')?.name || null)
-      : null;
-  });
-  wrap.addEventListener('htmx:afterSwap', () => {
-    // Sync the auto-refresh URL to whatever the user just loaded.
-    const marker = wrap.querySelector('#jobs-current-url');
-    if (marker) {
-      wrap.setAttribute('hx-get', marker.dataset.url);
-      htmx.process(wrap);
-    }
-    if (saved) {
-      wrap.querySelectorAll('input[name=job_id]').forEach(c => {
-        if (saved.has(c.value)) c.checked = true;
-      });
-      saved = null;
-    }
-    if (openComboKey) {
-      const input = wrap.querySelector(`.multi-combo input[name="${openComboKey}"]`);
-      const combo = input?.closest('.multi-combo');
-      if (combo) combo.classList.add('open');
-      openComboKey = null;
-    }
-  });
-})();
-</script>
+<div class="jobs-wrap" hx-get="/jobs/list" hx-trigger="load"
+     hx-swap="innerHTML">Loading…</div>
 {% endblock %}
