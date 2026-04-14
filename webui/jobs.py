@@ -16,6 +16,16 @@ from . import wayback
 OUTPUT_ROOT = Path(os.environ.get("OUTPUT_DIR", "/app/output"))
 DB_PATH = OUTPUT_ROOT / ".dashboard.db"
 
+
+def _max_concurrent() -> int:
+    try:
+        return max(1, int(os.environ.get("MAX_CONCURRENT", "3")))
+    except ValueError:
+        return 3
+
+
+MAX_CONCURRENT_DEFAULT = _max_concurrent()
+
 UPSTREAM_FLAGS = [
     "OPTIMIZE_HTML", "OPTIMIZE_IMAGES", "MINIFY_JS", "MINIFY_CSS",
     "REMOVE_TRACKERS", "REMOVE_ADS", "REMOVE_CLICKABLE_CONTACTS",
@@ -57,6 +67,10 @@ def init_db() -> None:
             started_at TEXT,
             finished_at TEXT,
             schedule_id INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -228,18 +242,30 @@ async def _run_one(job: sqlite3.Row) -> None:
         )
 
 
-async def worker_loop(stop: asyncio.Event) -> None:
-    while not stop.is_set():
-        with connect() as c:
-            row = c.execute(
-                "SELECT * FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT 1"
-            ).fetchone()
-        if row is None:
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                pass
-            continue
+def _get_setting(key: str, default: str) -> str:
+    with connect() as c:
+        r = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return r["value"] if r else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with connect() as c:
+        c.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
+
+
+def get_max_concurrent() -> int:
+    try:
+        return max(1, min(20, int(_get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT)))))
+    except ValueError:
+        return MAX_CONCURRENT_DEFAULT
+
+
+async def _run_with_sem(row, sem: asyncio.Semaphore):
+    async with sem:
         try:
             await _run_one(row)
         except Exception as e:
@@ -248,5 +274,50 @@ async def worker_loop(stop: asyncio.Event) -> None:
                     "UPDATE jobs SET status='error', finished_at=? WHERE id=?",
                     (now_iso(), row["id"]),
                 )
-            with open(row["log_path"], "a") as f:
-                f.write(f"\n[dashboard] worker error: {e}\n")
+            try:
+                with open(row["log_path"], "a") as f:
+                    f.write(f"\n[dashboard] worker error: {e}\n")
+            except Exception:
+                pass
+
+
+async def worker_loop(stop: asyncio.Event) -> None:
+    active: set[asyncio.Task] = set()
+    while not stop.is_set():
+        limit = get_max_concurrent()
+        # Reap finished tasks
+        done = {t for t in active if t.done()}
+        active -= done
+        # Fetch up to the concurrency headroom of pending jobs that aren't already running.
+        headroom = max(0, limit - len(active))
+        if headroom == 0:
+            try:
+                await asyncio.wait(active, timeout=2.0, return_when=asyncio.FIRST_COMPLETED)
+            except ValueError:
+                await asyncio.sleep(1)
+            continue
+        with connect() as c:
+            rows = c.execute(
+                "SELECT * FROM jobs WHERE status='pending' ORDER BY id ASC LIMIT ?",
+                (headroom,),
+            ).fetchall()
+        if not rows:
+            try:
+                if active:
+                    await asyncio.wait(active, timeout=2.0, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.wait_for(stop.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        sem = _SEMAPHORE  # shared semaphore bound to limit; re-sized below
+        for row in rows:
+            active.add(asyncio.create_task(_run_with_sem(row, sem)))
+    # Shutdown: wait for in-flight to finish
+    if active:
+        await asyncio.gather(*active, return_exceptions=True)
+
+
+# Semaphore resized dynamically via get_max_concurrent(); we approximate by
+# capping pending fetches in worker_loop (which is the actual throttle).
+_SEMAPHORE = asyncio.Semaphore(1000)

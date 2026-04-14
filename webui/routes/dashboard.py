@@ -67,6 +67,7 @@ async def index(request: Request):
         "request": request,
         "flag_groups": FLAG_GROUPS,
         "radio_groups": RADIO_GROUPS,
+        "max_concurrent": jobs.get_max_concurrent(),
     })
 
 
@@ -83,6 +84,17 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 25, status:
         "request": request, "jobs": rows, "page": page, "pages": pages,
         "per_page": per_page, "total": total, "status": status,
     })
+
+
+@router.post("/settings/max-concurrent")
+async def set_max_concurrent(request: Request):
+    form = await request.form()
+    try:
+        n = max(1, min(20, int(form.get("max_concurrent") or 3)))
+    except ValueError:
+        n = 3
+    jobs.set_setting("max_concurrent", str(n))
+    return RedirectResponse("/", status_code=303)
 
 
 @router.post("/jobs/bulk-action")
