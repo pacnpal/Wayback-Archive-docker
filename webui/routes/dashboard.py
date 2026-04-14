@@ -114,17 +114,22 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 0,
     qs_types: list[str] = []
     for v in request.query_params.getlist("types"):
         qs_types.extend(_split_csv(v))
-    explicit_filter = bool(
+    # `_filter=1` is emitted by the toolbar form whenever any filter input
+    # changes. Its presence means "trust the submitted values" — including
+    # empty ones (user ticked all off). Otherwise fall back to cookie.
+    submitted_filter = request.query_params.get("_filter") == "1"
+    explicit_filter = submitted_filter or bool(
         request.query_params.getlist("statuses") or
         request.query_params.getlist("types") or
         request.query_params.get("per_page")
     )
 
     cookie = _parse_filter_cookie(request.cookies.get("filter_jobs") or "")
-    if not qs_statuses:
-        qs_statuses = _split_csv(cookie.get("statuses", ""))
-    if not qs_types:
-        qs_types = _split_csv(cookie.get("types", ""))
+    if not submitted_filter:
+        if not qs_statuses:
+            qs_statuses = _split_csv(cookie.get("statuses", ""))
+        if not qs_types:
+            qs_types = _split_csv(cookie.get("types", ""))
     if per_page <= 0:
         try:
             per_page = int(cookie.get("per_page") or 25)
