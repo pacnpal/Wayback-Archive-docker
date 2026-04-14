@@ -202,8 +202,12 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
     entries = []
     for p in sorted(cur.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
         rel = str(p.relative_to(base))
-        entries.append({"name": p.name, "rel": rel, "is_dir": p.is_dir(),
-                        "size": p.stat().st_size if p.is_file() else 0})
+        is_dir = p.is_dir()
+        entries.append({
+            "name": p.name, "rel": rel, "is_dir": is_dir,
+            "size": p.stat().st_size if p.is_file() else 0,
+            "is_text": (not is_dir) and (p.suffix.lower() in TEXT_EXTS),
+        })
     parent = None
     if path:
         parent_rel = str(Path(path).parent)
