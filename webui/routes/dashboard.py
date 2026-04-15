@@ -80,7 +80,7 @@ FLAG_DEFAULTS = _flatten_flags()
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "flag_groups": FLAG_GROUPS,
         "radio_groups": RADIO_GROUPS,
@@ -179,7 +179,7 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 0,
         p = job_progress.read_progress(r["log_path"], mf)
         if p is not None:
             progress[r["id"]] = p
-    resp = templates.TemplateResponse("_jobs_list.html", {
+    resp = templates.TemplateResponse(request, "_jobs_list.html", {
         "request": request, "jobs": rows, "page": page, "pages": pages,
         "per_page": per_page, "total": total,
         "selected_statuses": qs_statuses, "selected_types": qs_types,
@@ -312,7 +312,7 @@ async def job_detail(request: Request, job_id: int):
     job = jobs.get_job(job_id)
     if not job:
         raise HTTPException(404)
-    return templates.TemplateResponse("job_detail.html", {"request": request, "job": job})
+    return templates.TemplateResponse(request, "job_detail.html", {"request": request, "job": job})
 
 
 @router.get("/jobs/{job_id}/log", response_class=PlainTextResponse)
@@ -337,9 +337,9 @@ async def cancel(job_id: int):
 async def api_snapshots(request: Request, target_url: str = ""):
     target_url = target_url.strip()
     if not target_url:
-        return templates.TemplateResponse("_snapshots.html", {"request": request, "snaps": [], "error": "Enter a URL first"})
+        return templates.TemplateResponse(request, "_snapshots.html", {"request": request, "snaps": [], "error": "Enter a URL first"})
     try:
         snaps = wayback.list_snapshots(target_url)
     except Exception as e:
-        return templates.TemplateResponse("_snapshots.html", {"request": request, "snaps": [], "error": f"CDX error: {e}"})
-    return templates.TemplateResponse("_snapshots.html", {"request": request, "snaps": snaps, "error": None})
+        return templates.TemplateResponse(request, "_snapshots.html", {"request": request, "snaps": [], "error": f"CDX error: {e}"})
+    return templates.TemplateResponse(request, "_snapshots.html", {"request": request, "snaps": snaps, "error": None})

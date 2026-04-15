@@ -56,7 +56,7 @@ async def diff(request: Request, host: str, a: str, b: str, path: str = ""):
             k for k in set(fa) & set(fb)
             if fa[k].stat().st_size != fb[k].stat().st_size or _sha1(fa[k]) != _sha1(fb[k])
         )
-        return templates.TemplateResponse("diff_tree.html", {
+        return templates.TemplateResponse(request, "diff_tree.html", {
             "request": request, "host": host, "a": a, "b": b,
             "added": added, "removed": removed, "modified": modified,
         })
@@ -66,7 +66,7 @@ async def diff(request: Request, host: str, a: str, b: str, path: str = ""):
         raise HTTPException(400)
     ext = pa.suffix.lower()
     if ext not in TEXT_EXTS:
-        return templates.TemplateResponse("diff_file.html", {
+        return templates.TemplateResponse(request, "diff_file.html", {
             "request": request, "host": host, "a": a, "b": b, "path": path,
             "binary": True,
             "hash_a": _sha1(pa) if pa.exists() else "—",
@@ -77,7 +77,7 @@ async def diff(request: Request, host: str, a: str, b: str, path: str = ""):
     ta = pa.read_text(encoding="utf-8", errors="replace").splitlines() if pa.exists() else []
     tb = pb.read_text(encoding="utf-8", errors="replace").splitlines() if pb.exists() else []
     html = difflib.HtmlDiff(wrapcolumn=100).make_table(ta, tb, f"A: {a}", f"B: {b}", context=True, numlines=3)
-    return templates.TemplateResponse("diff_file.html", {
+    return templates.TemplateResponse(request, "diff_file.html", {
         "request": request, "host": host, "a": a, "b": b, "path": path,
         "binary": False, "diff_html": html,
     })

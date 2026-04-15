@@ -144,7 +144,10 @@ def _patch() -> None:
             # Sandbox rejects relative/missing-netloc URLs outright — these
             # are the bug class that used to leak files to OUTPUT_DIR root.
             if not netloc:
-                log.warning("rejecting URL without netloc: %s", url)
+                # Upstream occasionally hands us un-absolutized relative URLs;
+                # the sandbox is working as intended. Log at DEBUG so normal
+                # runs aren't flooded.
+                log.debug("rejecting URL without netloc: %s", url)
                 raise ValueError("no netloc")
             local_path = self._get_local_path(normalized)
             if local_path.is_file() and local_path.stat().st_size > 0:

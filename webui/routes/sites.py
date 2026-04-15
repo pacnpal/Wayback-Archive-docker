@@ -83,7 +83,7 @@ async def sites_index_route(request: Request, sort: str = "", dir: str = "",
     page = max(1, min(page, pages))
     start = (page - 1) * per_page
     slice_ = hosts[start:start + per_page]
-    resp = templates.TemplateResponse("sites_index.html", {
+    resp = templates.TemplateResponse(request, "sites_index.html", {
         "request": request, "hosts": slice_, "sort": sort, "dir": dir,
         "page": page, "pages": pages, "per_page": per_page, "total": total,
     })
@@ -162,7 +162,7 @@ async def site_detail(request: Request, host: str,
         except Exception:
             audit_map[ts] = None
 
-    resp = templates.TemplateResponse("site_detail.html", {
+    resp = templates.TemplateResponse(request, "site_detail.html", {
         "request": request,
         "host": host,
         "rows": rows_page,
@@ -247,7 +247,7 @@ async def audit_details(request: Request, host: str, ts: str):
     ts = valid_ts(ts)
     path = safe_output_child(host, ts)
     data = asset_audit.get_audit(path)
-    return templates.TemplateResponse("audit_details.html", {
+    return templates.TemplateResponse(request, "audit_details.html", {
         "request": request, "host": host, "ts": ts,
         "total": data["total_refs"], "present": data["present"],
         "missing": data["missing"],
@@ -303,7 +303,7 @@ async def search(request: Request, host: str, ts: str = "", q: str = ""):
             n_docs = idx.get("n_docs", 0)
             if q.strip():
                 hits = _search.query(idx, q.strip())
-    return templates.TemplateResponse("search.html", {
+    return templates.TemplateResponse(request, "search.html", {
         "request": request, "host": host, "ts": ts, "q": q,
         "hits": hits, "n_docs": n_docs,
     })

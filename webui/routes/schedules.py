@@ -71,7 +71,7 @@ async def list_schedules(request: Request, sort: str = "", dir: str = ""):
             f"SELECT * FROM schedules ORDER BY {col} {direction}, id DESC"
         ).fetchall()
     server_time_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    resp = templates.TemplateResponse("schedules.html", {
+    resp = templates.TemplateResponse(request, "schedules.html", {
         "request": request, "schedules": rows, "sort": sort, "dir": dir,
         "server_time_utc": server_time_utc,
     })

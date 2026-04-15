@@ -130,7 +130,7 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
     start = (page - 1) * per_page
     slice_ = items[start:start + per_page]
     hosts_all = sorted({r["host"] for r in _all_snapshots()})
-    resp = templates.TemplateResponse("snapshots.html", {
+    resp = templates.TemplateResponse(request, "snapshots.html", {
         "request": request, "items": slice_, "page": page, "pages": pages,
         "per_page": per_page, "total": total,
         "selected_hosts": qs_hosts, "hosts_all": hosts_all,
@@ -239,7 +239,7 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
     if path:
         parent_rel = str(Path(path).parent)
         parent = "" if parent_rel == "." else parent_rel
-    return templates.TemplateResponse("tree.html", {
+    return templates.TemplateResponse(request, "tree.html", {
         "request": request, "host": host, "ts": ts, "entries": entries, "parent": parent,
     })
 
@@ -354,7 +354,7 @@ async def edit_get(request: Request, host: str, ts: str, path: str):
     content = f.read_text(encoding="utf-8", errors="replace")
     parent_rel = str(Path(path).parent)
     parent = "" if parent_rel == "." else parent_rel
-    return templates.TemplateResponse("editor.html", {
+    return templates.TemplateResponse(request, "editor.html", {
         "request": request, "host": host, "ts": ts, "path": path,
         "content": content, "mode": MODE_MAP.get(ext, "text"), "parent": parent,
     })
