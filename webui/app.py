@@ -93,10 +93,16 @@ async def wayback_local(rest: str):
     import re
     from fastapi import HTTPException
     from fastapi.responses import FileResponse
+    from .routes._validators import valid_host, valid_ts
     m = re.match(r"^(\d{4,14})[a-z_]*/(https?://)([^/]+)(/.*)?$", rest)
     if not m:
         raise HTTPException(404)
-    ts, _scheme, host, path = m.group(1), m.group(2), m.group(3), m.group(4) or "/"
+    ts_raw, _scheme, host_raw, path = m.group(1), m.group(2), m.group(3), m.group(4) or "/"
+    # Only 14-digit timestamps are valid snapshot dirs on disk; validate both.
+    host = valid_host(host_raw)
+    if len(ts_raw) != 14:
+        raise HTTPException(404)
+    ts = valid_ts(ts_raw)
     base = (jobs.OUTPUT_ROOT / host / ts).resolve()
     if not base.is_dir():
         raise HTTPException(404)
@@ -123,9 +129,11 @@ async def health():
     try:
         with jobs.connect() as c:
             c.execute("SELECT 1").fetchone()
-    except Exception as e:
+    except Exception:
+        # Don't leak exception text to clients; log it for operators.
+        log_mod.get("health").exception("health check failed")
         from fastapi.responses import JSONResponse
-        return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+        return JSONResponse({"status": "error"}, status_code=503)
     return {"status": "ok"}
 
 

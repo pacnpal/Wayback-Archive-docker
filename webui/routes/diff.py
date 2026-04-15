@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import jobs
+from ._validators import valid_host, valid_ts
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -42,6 +43,9 @@ def _snapshot_root(host: str, ts: str) -> Path:
 
 @router.get("/sites/{host}/diff", response_class=HTMLResponse)
 async def diff(request: Request, host: str, a: str, b: str, path: str = ""):
+    host = valid_host(host)
+    a = valid_ts(a)
+    b = valid_ts(b)
     ra = _snapshot_root(host, a)
     rb = _snapshot_root(host, b)
     if not path:

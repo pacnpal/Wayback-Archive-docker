@@ -41,7 +41,7 @@
   <button type="submit" class="secondary">Delete selected (<span id="sites-sel-count">0</span>)</button>
   <label class="per-page-wrap">Per page
     <select name="per_page"
-            onchange="location.href='?sort={{sort}}&dir={{dir}}&per_page='+this.value">
+            onchange="const u=new URL(location);u.searchParams.set('per_page',this.value);location.href=u;">
       {% for n in sizes %}
         <option value="{{n}}" {% if n == per_page %}selected{% endif %}>{% if n >= 100000 %}All{% else %}{{n}}{% endif %}</option>
       {% endfor %}
