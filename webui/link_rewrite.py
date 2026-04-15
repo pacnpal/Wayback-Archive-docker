@@ -17,6 +17,101 @@ from posixpath import relpath
 from bs4 import BeautifulSoup
 
 _HTML_EXTS = {".html", ".htm"}
+
+# Archive-time rewriter hooks. See rewrite_snapshot() — these run once per
+# archived HTML file during the "Fix links" operator action.
+
+# Known search-CGI endpoints across 1996–2001 sites. `<form action>` hitting
+# any of these gets rerouted to our replacement /sites/{host}/search?ts=…
+# (a TF-IDF index over the same archived content).
+_SEARCH_CGI_RE = re.compile(
+    r"(^|/)(qfind|search|vtopic|asearch|cfilter|showprefs)"
+    r"(\.exe|\.cgi|\.pl|\.asp|)(\?|$|/)",
+    re.IGNORECASE,
+)
+
+# Form-mail / comments / contact-form CGIs: the original SMTP target is
+# long gone; neutralize the form.
+_FORM_MAIL_RE = re.compile(
+    r"(form-?mail|comments?|contact|feedback|usa_comments)"
+    r"\.(pl|cgi|asp|exe)\b",
+    re.IGNORECASE,
+)
+
+# Generic dead-CGI catchall for <form action>: anything under /cgi-bin/ or
+# ending in an obvious CGI extension that wasn't matched by the search rule.
+_DEAD_CGI_RE = re.compile(
+    r"(^|/)(cgi-bin/|vrty_cgi/|search97cgi/)"
+    r"|\.(pl|cgi|asp|exe)(\?|$)",
+    re.IGNORECASE,
+)
+
+# Hit-counter / web-bug images. The original CGI returned a dynamic GIF;
+# now it's a broken-image icon. Swap to a 1×1 transparent PNG.
+_COUNTER_RE = re.compile(
+    r"(counter|wwwcounter|hitcount|webcounter|/Counter)",
+    re.IGNORECASE,
+)
+_COUNTER_STUB = "/static/transparent.png"
+
+
+def _neutralize_forms_and_counters(soup, host: str, ts: str) -> int:
+    """In-place rewrite of:
+      - <form action=...qfind.exe...> → search replacement
+      - <form action=...form-mail.pl...> → inert + visible notice
+      - <img src=...counter...> → 1×1 transparent stub
+    Returns count of modifications."""
+    hits = 0
+    search_action = f"/sites/{host}/search?ts={ts}" if host and ts else ""
+
+    for form in soup.find_all("form"):
+        action = (form.get("action") or "").strip()
+        if not action:
+            continue
+        # Search-CGI → our replacement. Keep method GET since our route is GET.
+        if _SEARCH_CGI_RE.search(action) and search_action:
+            form["action"] = search_action
+            form["method"] = "get"
+            # Rename the first text-ish input to `q` so our route receives it.
+            for inp in form.find_all("input"):
+                itype = (inp.get("type") or "text").lower()
+                if itype in ("text", "search", "") and inp.has_attr("name"):
+                    inp["name"] = "q"
+                    break
+            hits += 1
+            continue
+        # Form-mail / contact / any cgi-bin: neutralize.
+        if _FORM_MAIL_RE.search(action) or _DEAD_CGI_RE.search(action):
+            form["action"] = "#"
+            form["onsubmit"] = (
+                "alert('This form submitted to a CGI that the archive did "
+                "not capture — submission would go nowhere.'); return false;"
+            )
+            # Add a small visible banner at the top of the form if not already
+            # present (idempotent via a marker class).
+            if not form.find(class_="wa-cgi-notice"):
+                from bs4 import BeautifulSoup as _BS
+                notice = _BS(
+                    "<div class='wa-cgi-notice' style='background:#fef3c7;"
+                    "border-left:3px solid #a16207;padding:.4rem .6rem;"
+                    "margin-bottom:.5rem;font-size:.85rem;color:#713f12'>"
+                    "⚠ Form submissions to this CGI are not archived. "
+                    "Clicking the submit button will not actually send "
+                    "anything.</div>",
+                    "html.parser",
+                ).div
+                if notice is not None:
+                    form.insert(0, notice)
+            hits += 1
+
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if src and _COUNTER_RE.search(src):
+            img["src"] = _COUNTER_STUB
+            img["alt"] = img.get("alt") or "(archived hit counter)"
+            hits += 1
+
+    return hits
 _CSS_EXTS = {".css"}
 
 # url(...) inside CSS — tolerant of unquoted, single- or double-quoted.
@@ -252,10 +347,16 @@ def _rewrite_css_text(css: str, file_rel_dir: str) -> tuple[str, int]:
     return css, hits[0]
 
 
-def rewrite_html(html: str, file_rel_dir: str) -> tuple[str, int]:
+def rewrite_html(html: str, file_rel_dir: str,
+                 host: str = "", ts: str = "") -> tuple[str, int]:
     """Rewrite absolute-path refs inside HTML. Returns (new_html, hit_count).
     Uses BeautifulSoup so unquoted HTML4 attributes are handled. The document
-    is reserialized only if something actually changed."""
+    is reserialized only if something actually changed.
+
+    When `host` and `ts` are provided, also rewires dead CGI forms (search →
+    our /sites/{host}/search, mail/contact → inert) and swaps hit-counter
+    images for a transparent 1×1 stub.
+    """
     try:
         soup = BeautifulSoup(html, "lxml")
     except Exception:
@@ -274,6 +375,9 @@ def rewrite_html(html: str, file_rel_dir: str) -> tuple[str, int]:
             if h:
                 tag[attr] = new
                 hits += h
+
+    # Rewrite dead search/mail CGI forms and hit-counter images.
+    hits += _neutralize_forms_and_counters(soup, host, ts)
 
     # `<img ismap>` server-side imagemaps no longer work (the CGI is dead).
     # If the surrounding anchor points somewhere other than the .map file,
@@ -325,6 +429,12 @@ def rewrite_snapshot(snapshot_dir: Path) -> dict:
     """Rewrite every HTML/CSS file under snapshot_dir in place. Returns a
     summary dict: {files_scanned, files_changed, refs_rewritten}."""
     scanned = changed = rewrites = 0
+    # Derive host / ts from the snapshot path (layout: .../<host>/<ts>/).
+    try:
+        ts_name = snapshot_dir.name
+        host_name = snapshot_dir.parent.name
+    except Exception:
+        ts_name = host_name = ""
     for p in snapshot_dir.rglob("*"):
         if not p.is_file():
             continue
@@ -340,7 +450,7 @@ def rewrite_snapshot(snapshot_dir: Path) -> dict:
         if rel_dir == ".":
             rel_dir = ""
         if ext in _HTML_EXTS:
-            new_text, hits = rewrite_html(text, rel_dir)
+            new_text, hits = rewrite_html(text, rel_dir, host_name, ts_name)
         else:
             new_text, hits = rewrite_css(text, rel_dir)
         if hits and new_text != text:

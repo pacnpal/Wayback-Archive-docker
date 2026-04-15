@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Search — {{ host }}{% endblock %}
+{% block content %}
+<p><a href="/sites/{{host}}">← {{ host }}</a> · snapshot <code>{{ ts }}</code></p>
+<h2>Search</h2>
+<form method="get" style="display:flex;gap:.5rem;align-items:end;max-width:40em">
+  <input type="hidden" name="ts" value="{{ ts }}">
+  <label style="flex:1">Query
+    <input type="text" name="q" value="{{ q }}" autofocus required>
+  </label>
+  <button type="submit">Search</button>
+</form>
+{% if q %}
+  <p>
+    {% if hits %}
+      <strong>{{ hits|length }}</strong> hit{{ 's' if hits|length != 1 else '' }}
+      for <code>{{ q }}</code>
+    {% else %}
+      No hits for <code>{{ q }}</code>.
+    {% endif %}
+  </p>
+  {% if hits %}
+    <ol style="padding-left:1.2rem">
+    {% for h in hits %}
+      <li style="margin:.4rem 0">
+        <a href="/sites/{{host}}/view/{{ts}}/{{ h.rel }}">{{ h.title or h.rel }}</a>
+        <div style="font-size:.8rem;color:var(--pico-muted-color)">
+          <code>{{ h.rel }}</code> &middot; score {{ "%.2f"|format(h.score) }}
+        </div>
+      </li>
+    {% endfor %}
+    </ol>
+  {% endif %}
+{% endif %}
+<p style="font-size:.8rem;color:var(--pico-muted-color);margin-top:2em">
+  Local TF-IDF search over {{ n_docs }} indexed HTML file{{ 's' if n_docs != 1 else '' }} — replaces the
+  archived site's long-dead search CGI. Rebuild the index from the
+  site page if snapshots changed.
+</p>
+{% endblock %}

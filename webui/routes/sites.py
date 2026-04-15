@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from urllib.parse import quote as _urlquote
 
-from .. import jobs, wayback, sites_index, link_rewrite, asset_audit, cleanup_orphans
+from .. import jobs, wayback, sites_index, link_rewrite, asset_audit, cleanup_orphans, search as _search
 from ..safe_path import safe_output_child
 from ._validators import valid_host, valid_ts, valid_ts_optional
 
@@ -252,6 +252,57 @@ async def audit_details(request: Request, host: str, ts: str):
         "total": data["total_refs"], "present": data["present"],
         "missing": data["missing"],
     })
+
+
+@router.get("/sites/{host}/search", response_class=HTMLResponse)
+async def search(request: Request, host: str, ts: str = "", q: str = ""):
+    """TF-IDF full-text search over a snapshot's HTML. Replacement for the
+    archived site's 1990s search CGI (qfind.exe / vtopic.exe / etc)."""
+    host = valid_host(host)
+    ts = valid_ts(ts) if ts else ""
+    hits: list[dict] = []
+    n_docs = 0
+    if ts:
+        snap = safe_output_child(host, ts)
+        if snap.is_dir():
+            idx = _search.get_index(snap)
+            n_docs = idx.get("n_docs", 0)
+            if q.strip():
+                hits = _search.query(idx, q.strip())
+    return templates.TemplateResponse("search.html", {
+        "request": request, "host": host, "ts": ts, "q": q,
+        "hits": hits, "n_docs": n_docs,
+    })
+
+
+@router.post("/sites/{host}/build-search-index")
+async def build_search_index(host: str):
+    """Build/refresh the .search.json index for every snapshot of the host."""
+    host = valid_host(host)
+    host_dir = safe_output_child(host)
+    if not host_dir.is_dir():
+        resp = RedirectResponse(f"/sites/{_qhost(host)}", status_code=303)
+        resp.headers["HX-Trigger"] = "jobs-changed"
+        return resp
+    indexed = 0
+    total_docs = 0
+    for snap in host_dir.iterdir():
+        if not snap.is_dir() or not sites_index.is_snapshot_ts(snap.name):
+            continue
+        idx = _search.get_index(snap, force=True)
+        indexed += 1
+        total_docs += idx.get("n_docs", 0)
+    from .. import log as _log
+    _log.get("search").info(
+        "search index host=%s snapshots=%d docs=%d",
+        host, indexed, total_docs,
+    )
+    resp = RedirectResponse(
+        f"/sites/{_qhost(host)}?search_done=1&snapshots={indexed}&docs={total_docs}",
+        status_code=303,
+    )
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/sites/{host}/repair")

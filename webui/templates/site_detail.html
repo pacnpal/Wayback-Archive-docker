@@ -10,7 +10,7 @@
 {% set qs_keep = "sort=" ~ sort ~ "&dir=" ~ dir %}
 
 <h2>{{ host }}</h2>
-<p><a href="/sites">← all sites</a> · <a href="/snapshots?host={{host}}">snapshots manager</a></p>
+<p><a href="/sites">← all sites</a> · <a href="/snapshots?host={{host}}">snapshots manager</a> · <a href="https://github.com/pacnpal/Wayback-Archive-Dashboard/blob/master/docs/archive-limitations.md" target="_blank" rel="noopener">what's reconstructed vs. unrecoverable</a></p>
 
 <section>
   <h3>Archive now</h3>
@@ -82,11 +82,21 @@
           onsubmit="return confirm('Search Wayback CDX for alt-timestamp captures of every .map file that currently holds the CGI error page?\n\nOverwrites HTML-error .map files with recovered text when found; no-op otherwise.');">
       <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem" title="Recover 1990s imagemap coordinate data from Wayback">Recover imagemaps</button>
     </form>
+    <form method="post" action="/sites/{{host}}/build-search-index">
+      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem" title="TF-IDF full-text index over every snapshot's HTML — drives the /search route that replaces the archived site's dead search CGI">Build search index</button>
+    </form>
     {% endif %}
   </h3>
   {% if request.query_params.get('cleanup_done') %}
     <p class="status-ok"><strong>Done.</strong>
       Quarantined {{ request.query_params.get('moved') or 0 }} orphan entr{% if request.query_params.get('moved') == '1' %}y{% else %}ies{% endif %} into <code>{{host}}/_orphaned/</code>.
+    </p>
+  {% endif %}
+  {% if request.query_params.get('search_done') %}
+    <p class="status-ok"><strong>Search index built:</strong>
+      {{ request.query_params.get('docs') or 0 }} HTML doc(s) across
+      {{ request.query_params.get('snapshots') or 0 }} snapshot(s). Try it at
+      <a href="/sites/{{host}}/search?ts={{ rows[0][0] if rows else '' }}">/sites/{{host}}/search</a>.
     </p>
   {% endif %}
   {% if request.query_params.get('imagemaps_done') %}
