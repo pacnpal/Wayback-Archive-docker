@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import jobs, wayback, sites_index, link_rewrite, asset_audit, cleanup_orphans
+from ._validators import valid_host, valid_ts, valid_ts_optional
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -90,6 +91,7 @@ async def site_detail(request: Request, host: str,
                       sort: str = "", dir: str = "",
                       page: int = 1, per_page: int = 50,
                       remote: int = 0, from_year: str = "", to_year: str = ""):
+    host = valid_host(host)
     explicit = bool(sort or dir)
     if not sort or not dir:
         raw = request.cookies.get("sort_site_detail") or ""
@@ -177,6 +179,8 @@ async def rewrite_links(host: str, ts: str = ""):
     """Rewrite absolute-path URLs inside archived HTML/CSS to relative paths,
     so pages render correctly when served from /sites/{host}/view. Applies to
     a single snapshot if `ts` is given, otherwise every snapshot of the host."""
+    host = valid_host(host)
+    ts = valid_ts_optional(ts)
     host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
         resp = RedirectResponse(f"/sites/{host}", status_code=303)
@@ -209,6 +213,8 @@ async def rewrite_links(host: str, ts: str = ""):
 
 @router.post("/sites/{host}/audit")
 async def audit_snapshots(host: str, ts: str = ""):
+    host = valid_host(host)
+    ts = valid_ts_optional(ts)
     host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
         resp = RedirectResponse(f"/sites/{host}", status_code=303)
@@ -227,6 +233,8 @@ async def audit_snapshots(host: str, ts: str = ""):
 
 @router.get("/sites/{host}/audit/{ts}", response_class=HTMLResponse)
 async def audit_details(request: Request, host: str, ts: str):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     path = jobs.OUTPUT_ROOT / host / ts
     data = asset_audit.get_audit(path)
     return templates.TemplateResponse("audit_details.html", {
@@ -238,6 +246,8 @@ async def audit_details(request: Request, host: str, ts: str):
 
 @router.post("/sites/{host}/repair")
 async def repair_snapshot(host: str, ts: str = Form(...)):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     path = jobs.OUTPUT_ROOT / host / ts
     data = asset_audit.get_audit(path)
     rel_paths = [m["rel"] for m in data["missing"]]
@@ -250,6 +260,7 @@ async def repair_snapshot(host: str, ts: str = Form(...)):
 
 @router.post("/sites/{host}/archive")
 async def archive_one(host: str, request: Request):
+    host = valid_host(host)
     form = await request.form()
     ts = (form.get("timestamp") or "").strip() or None
     from .dashboard import _default_flags
@@ -277,6 +288,7 @@ async def cleanup_all_orphans():
 @router.post("/sites/{host}/cleanup-orphans")
 async def cleanup_host_orphans(host: str):
     """Quarantine non-snapshot entries under a single host dir."""
+    host = valid_host(host)
     host_dir = jobs.OUTPUT_ROOT / host
     summary = cleanup_orphans.cleanup_host(host_dir)
     resp = RedirectResponse(
@@ -291,6 +303,7 @@ _GRAN_DIGITS = {"year": 4, "month": 6, "day": 8, "every": 14}
 
 @router.post("/sites/{host}/archive-range")
 async def archive_range(host: str, request: Request):
+    host = valid_host(host)
     form = await request.form()
     from_d = (form.get("from_date") or "").strip()
     to_d = (form.get("to_date") or "").strip()

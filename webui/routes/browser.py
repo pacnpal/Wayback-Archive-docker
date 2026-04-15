@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
 from .. import jobs
+from ._validators import valid_host, valid_ts
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -57,6 +58,8 @@ def _all_snapshots() -> list[dict]:
 @router.get("/snapshots", response_class=HTMLResponse)
 async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = "",
                 sort: str = "", dir: str = "", completed_only: int = -1):
+    if host:
+        host = valid_host(host)
     explicit_sort = bool(sort or dir)
     if not sort or not dir:
         raw = request.cookies.get("sort_snapshots") or ""
@@ -189,6 +192,7 @@ def _delete_host(host: str) -> dict:
 
 @router.post("/sites/{host}/delete-all")
 async def delete_host(host: str):
+    host = valid_host(host)
     _delete_host(host)
     resp = RedirectResponse("/sites", status_code=303)
     resp.headers["HX-Trigger"] = "jobs-changed, sites-changed"
@@ -201,7 +205,7 @@ async def sites_bulk_delete(request: Request):
     for h in form.getlist("host"):
         h = (h or "").strip()
         if h:
-            _delete_host(h)
+            _delete_host(valid_host(h))
     resp = RedirectResponse("/sites", status_code=303)
     resp.headers["HX-Trigger"] = "jobs-changed, sites-changed"
     return resp
@@ -209,6 +213,8 @@ async def sites_bulk_delete(request: Request):
 
 @router.get("/sites/{host}/tree", response_class=HTMLResponse)
 async def tree(request: Request, host: str, ts: str, path: str = ""):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     base = _host_dir(host) / ts
     if not base.is_dir():
         raise HTTPException(404)
@@ -240,11 +246,15 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
 async def view(host: str, ts: str, path: str = "index.html"):
     # Legacy query-string viewer; redirect into the path-based one so
     # rewritten relative refs resolve correctly.
+    host = valid_host(host)
+    ts = valid_ts(ts)
     return RedirectResponse(f"/sites/{host}/view/{ts}/{path}", status_code=302)
 
 
 @router.get("/sites/{host}/view/{ts}/{path:path}")
 async def view_path(request: Request, host: str, ts: str, path: str = ""):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     base = _host_dir(host) / ts
     f = _safe_path(base, path or "index.html")
     if f.is_dir():
@@ -268,6 +278,8 @@ async def view_path(request: Request, host: str, ts: str, path: str = ""):
 
 @router.get("/sites/{host}/edit", response_class=HTMLResponse)
 async def edit_get(request: Request, host: str, ts: str, path: str):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     base = _host_dir(host) / ts
     f = _safe_path(base, path)
     if not f.is_file():
@@ -286,6 +298,8 @@ async def edit_get(request: Request, host: str, ts: str, path: str):
 
 @router.post("/sites/{host}/edit")
 async def edit_post(host: str, ts: str, path: str, content: str = Form(...)):
+    host = valid_host(host)
+    ts = valid_ts(ts)
     base = _host_dir(host) / ts
     f = _safe_path(base, path)
     if not f.is_file():

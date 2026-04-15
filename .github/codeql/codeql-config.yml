@@ -1,0 +1,10 @@
+name: "CodeQL config"
+
+# Archived HTML under output/ is Wayback-fetched third-party content, not our
+# source. Scanning it flags things like `<script src="http://...">` in 1996-era
+# pages, which we neither can nor should fix.
+# Test fixtures exercise edge cases by construction — CodeQL's taint tracking
+# through them produces false positives only.
+paths-ignore:
+  - output/**
+  - webui/tests/**
