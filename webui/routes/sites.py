@@ -12,7 +12,7 @@ from .. import jobs, wayback, sites_index, link_rewrite, asset_audit
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
-SORT_KEYS = {"ts", "size", "files"}
+SORT_KEYS = {"ts", "size", "files", "downloaded"}
 
 
 def _local_hosts() -> list[tuple[str, int, str]]:
@@ -106,6 +106,7 @@ async def site_detail(request: Request, host: str,
         "ts": lambda kv: kv[0],
         "size": lambda kv: kv[1].get("size_bytes", 0),
         "files": lambda kv: kv[1].get("file_count", 0),
+        "downloaded": lambda kv: kv[1].get("mtime") or "",
     }
     rows = sorted(idx.items(), key=key_map[sort], reverse=reverse)
     total = len(rows)

@@ -58,9 +58,10 @@
   <thead><tr>
     <th><input type="checkbox" onclick="this.closest('form').querySelectorAll('input[name=snapshot]').forEach(c=>c.checked=this.checked)"></th>
     <th>{{ lh.sort_link('host', 'Host', sort, dir, sort_qs) }}</th>
-    <th>{{ lh.sort_link('ts', 'Snapshot', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('ts', 'Captured', sort, dir, sort_qs) }}</th>
     <th style="text-align:right">{{ lh.sort_link('size', 'Size', sort, dir, sort_qs) }}</th>
     <th style="text-align:right">{{ lh.sort_link('files', 'Files', sort, dir, sort_qs) }}</th>
+    <th>{{ lh.sort_link('downloaded', 'Downloaded', sort, dir, sort_qs) }}</th>
     <th>Actions</th>
   </tr></thead>
   <tbody>
@@ -71,6 +72,7 @@
       <td class="mono ts-cell">{{ r.ts[0:4] }}-{{ r.ts[4:6] }}-{{ r.ts[6:8] }}<br>{{ r.ts[8:10] }}:{{ r.ts[10:12] }}:{{ r.ts[12:14] }}</td>
       <td class="mono" style="text-align:right">{{ lh.size_human(r.size_bytes) }}</td>
       <td class="mono" style="text-align:right">{{ r.file_count }}</td>
+      <td class="mono ts-cell">{% if r.mtime %}{{ r.mtime[0:10] }}<br>{{ r.mtime[11:19] }}{% else %}—{% endif %}</td>
       <td>
         <a href="/sites/{{r.host}}/view?ts={{r.ts}}">view</a> ·
         <a href="/sites/{{r.host}}/tree?ts={{r.ts}}">browse</a>

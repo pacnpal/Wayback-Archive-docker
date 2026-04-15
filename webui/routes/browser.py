@@ -32,7 +32,7 @@ def _safe_path(base: Path, rel: str) -> Path:
     return p
 
 
-SNAP_SORT_KEYS = {"host", "ts", "size", "files"}
+SNAP_SORT_KEYS = {"host", "ts", "size", "files", "downloaded"}
 
 
 def _all_snapshots() -> list[dict]:
@@ -49,7 +49,8 @@ def _all_snapshots() -> list[dict]:
                 continue
             out.append({"host": h.name, "ts": ts,
                         "size_bytes": meta.get("size_bytes", 0),
-                        "file_count": meta.get("file_count", 0)})
+                        "file_count": meta.get("file_count", 0),
+                        "mtime": meta.get("mtime") or ""})
     return out
 
 
@@ -114,6 +115,7 @@ async def sites(request: Request, page: int = 1, per_page: int = 0, host: str = 
         "ts": lambda r: (r["ts"], r["host"]),
         "size": lambda r: r["size_bytes"],
         "files": lambda r: r["file_count"],
+        "downloaded": lambda r: r["mtime"],
     }
     items.sort(key=key_map[sort], reverse=reverse)
     total = len(items)
