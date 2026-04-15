@@ -459,21 +459,20 @@ def get_max_concurrent() -> int:
         return MAX_CONCURRENT_DEFAULT
 
 
-async def _run_with_sem(row, sem: asyncio.Semaphore):
-    async with sem:
+async def _run_job(row):
+    try:
+        await _run_one(row)
+    except Exception as e:
+        with connect() as c:
+            c.execute(
+                "UPDATE jobs SET status='error', finished_at=? WHERE id=?",
+                (now_iso(), row["id"]),
+            )
         try:
-            await _run_one(row)
-        except Exception as e:
-            with connect() as c:
-                c.execute(
-                    "UPDATE jobs SET status='error', finished_at=? WHERE id=?",
-                    (now_iso(), row["id"]),
-                )
-            try:
-                with open(row["log_path"], "a") as f:
-                    f.write(f"\n[dashboard] worker error: {e}\n")
-            except Exception:
-                pass
+            with open(row["log_path"], "a") as f:
+                f.write(f"\n[dashboard] worker error: {e}\n")
+        except Exception:
+            pass
 
 
 async def worker_loop(stop: asyncio.Event) -> None:
@@ -483,7 +482,8 @@ async def worker_loop(stop: asyncio.Event) -> None:
         # Reap finished tasks
         done = {t for t in active if t.done()}
         active -= done
-        # Fetch up to the concurrency headroom of pending jobs that aren't already running.
+        # Authoritative throttle: pull at most (limit - in-flight) pending jobs
+        # per tick. This is where `max_concurrent` is actually enforced.
         headroom = max(0, limit - len(active))
         if headroom == 0:
             try:
@@ -505,14 +505,8 @@ async def worker_loop(stop: asyncio.Event) -> None:
             except asyncio.TimeoutError:
                 pass
             continue
-        sem = _SEMAPHORE  # shared semaphore bound to limit; re-sized below
         for row in rows:
-            active.add(asyncio.create_task(_run_with_sem(row, sem)))
+            active.add(asyncio.create_task(_run_job(row)))
     # Shutdown: wait for in-flight to finish
     if active:
         await asyncio.gather(*active, return_exceptions=True)
-
-
-# Semaphore resized dynamically via get_max_concurrent(); we approximate by
-# capping pending fetches in worker_loop (which is the actual throttle).
-_SEMAPHORE = asyncio.Semaphore(1000)
