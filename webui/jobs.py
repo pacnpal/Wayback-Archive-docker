@@ -32,6 +32,8 @@ UPSTREAM_FLAGS = [
     "REMOVE_EXTERNAL_IFRAMES", "REMOVE_EXTERNAL_LINKS_KEEP_ANCHORS",
     "REMOVE_EXTERNAL_LINKS_REMOVE_ANCHORS", "MAKE_INTERNAL_LINKS_RELATIVE",
     "MAKE_NON_WWW", "MAKE_WWW", "KEEP_REDIRECTIONS", "MAX_FILES",
+    # Shim-level flags (consumed by webui.wayback_resume_shim, not upstream).
+    "USE_PLAYWRIGHT", "FETCH_WORKERS",
 ]
 
 from . import log as _log
@@ -349,7 +351,14 @@ async def _run_one(job: sqlite3.Row) -> None:
     env = os.environ.copy()
     env["WAYBACK_URL"] = job["wayback_url"]
     env["OUTPUT_DIR"] = job["site_dir"]
-    for k, v in json.loads(job["flags_json"]).items():
+    # Flip upstream defaults that change the archived bytes: keep host
+    # formatting (no www./non-www. rewrite) and preserve raw HTML formatting
+    # unless the user explicitly opts in via flags_json.
+    user_flags = json.loads(job["flags_json"])
+    for k, default in (("MAKE_NON_WWW", "0"), ("OPTIMIZE_HTML", "0")):
+        if k not in user_flags:
+            env[k] = default
+    for k, v in user_flags.items():
         if k in UPSTREAM_FLAGS and v not in (None, ""):
             env[k] = str(v)
     # Repair mode: spawn the repair shim instead of the resume shim.

@@ -11,6 +11,14 @@ services:
     volumes:
       - /mnt/user/appdata/wayback-archive:/app/output
     restart: unless-stopped
+    # Opt-in JS-rendering fallback for SPA sites. Uncomment and switch image to
+    # the playwright variant (built from Dockerfile.playwright) to enable.
+    #   docker build -f Dockerfile.playwright -t wayback-archive:playwright .
+    # Then set USE_PLAYWRIGHT=1 as a per-job flag in the dashboard.
+    # image: wayback-archive:playwright
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.playwright
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3).status==200 else 1)"]
       interval: 30s

@@ -3,6 +3,22 @@
 {% block title %}Sites{% endblock %}
 {% block content %}
 <h2>Sites</h2>
+{% if request.query_params.get('cleanup_done') %}
+  <p role="alert" style="padding:.5rem .8rem;border-radius:.3rem;background:var(--pico-ins-color);color:var(--pico-contrast-inverse)">
+    ✓ Quarantined {{ request.query_params.get('moved') or 0 }} orphan file(s) into <code>_orphaned/</code>.
+  </p>
+{% endif %}
+
+<details style="margin:.5rem 0">
+  <summary>Maintenance</summary>
+  <form method="post" action="/sites/cleanup-orphans" style="margin-top:.5rem"
+        onsubmit="return confirm('Move stray files/dirs at the output root and under each host into a _orphaned/ folder?\n\n(Reversible — nothing is deleted.)');">
+    <button type="submit" class="secondary">Clean up orphans</button>
+    <small style="margin-left:.5rem;color:var(--pico-muted-color)">
+      Quarantines files leaked outside their snapshot folder by older crawler runs.
+    </small>
+  </form>
+</details>
 <form method="get" action="" onsubmit="location.href='/sites/'+encodeURIComponent(this.host.value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''));return false">
   <label>Look up any host:
     <input type="text" name="host" required placeholder="example.com">

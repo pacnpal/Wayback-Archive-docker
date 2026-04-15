@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, sites_index, link_rewrite, asset_audit
+from .. import jobs, wayback, sites_index, link_rewrite, asset_audit, cleanup_orphans
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -20,7 +20,7 @@ def _local_hosts() -> list[tuple[str, int, str]]:
     if not root.exists():
         return []
     out = []
-    for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+    for h in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
         snaps = sorted(
             (s.name for s in h.iterdir()
              if s.is_dir() and sites_index.is_snapshot_ts(s.name)),
@@ -180,9 +180,13 @@ async def rewrite_links(host: str, ts: str = ""):
     host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
         resp = RedirectResponse(f"/sites/{host}", status_code=303)
-    resp.headers["HX-Trigger"] = "jobs-changed"
-    return resp
-    targets = [host_dir / ts] if ts else [p for p in host_dir.iterdir() if p.is_dir()]
+        resp.headers["HX-Trigger"] = "jobs-changed"
+        return resp
+    if ts:
+        targets = [host_dir / ts]
+    else:
+        targets = [p for p in host_dir.iterdir()
+                   if p.is_dir() and not p.name.startswith((".", "_"))]
     totals = {"snapshots": 0, "files_scanned": 0, "files_changed": 0, "refs_rewritten": 0}
     for snap in targets:
         if not snap.is_dir():
@@ -198,7 +202,9 @@ async def rewrite_links(host: str, ts: str = ""):
         host, totals["snapshots"], totals["files_changed"], totals["refs_rewritten"],
     )
     qs = "&".join(f"{k}={v}" for k, v in totals.items())
-    return RedirectResponse(f"/sites/{host}?rewrite_done=1&{qs}", status_code=303)
+    resp = RedirectResponse(f"/sites/{host}?rewrite_done=1&{qs}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
 
 
 @router.post("/sites/{host}/audit")
@@ -249,6 +255,33 @@ async def archive_one(host: str, request: Request):
     from .dashboard import _default_flags
     jobs.enqueue(f"https://{host}", ts, _default_flags())
     resp = RedirectResponse(f"/sites/{host}", status_code=303)
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
+
+
+@router.post("/sites/cleanup-orphans")
+async def cleanup_all_orphans():
+    """Quarantine stray files/dirs at OUTPUT_ROOT and under each host dir into
+    a `_orphaned/` folder. Addresses the leak-to-mount-root bug that older
+    crawler runs left behind (see wayback_resume_shim sandbox guard)."""
+    summary = cleanup_orphans.cleanup_all(jobs.OUTPUT_ROOT)
+    from .. import log as _log
+    _log.get("cleanup").info("orphans quarantined total=%d", summary["total"])
+    resp = RedirectResponse(
+        f"/sites?cleanup_done=1&moved={summary['total']}", status_code=303
+    )
+    resp.headers["HX-Trigger"] = "jobs-changed"
+    return resp
+
+
+@router.post("/sites/{host}/cleanup-orphans")
+async def cleanup_host_orphans(host: str):
+    """Quarantine non-snapshot entries under a single host dir."""
+    host_dir = jobs.OUTPUT_ROOT / host
+    summary = cleanup_orphans.cleanup_host(host_dir)
+    resp = RedirectResponse(
+        f"/sites/{host}?cleanup_done=1&moved={summary['count']}", status_code=303
+    )
     resp.headers["HX-Trigger"] = "jobs-changed"
     return resp
 

@@ -2,17 +2,17 @@
 from __future__ import annotations
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .link_rewrite import _URL_ATTR_RE, _CSS_URL_RE
+from .link_rewrite import extract_html_refs, extract_css_refs
 
 AUDIT_NAME = ".audit.json"
 _HTML_EXTS = {".html", ".htm"}
 _CSS_EXTS = {".css"}
-_SKIP_PREFIX = ("//", "#", "mailto:", "tel:", "javascript:", "data:", "/web/")
+_SKIP_PREFIX = ("//", "#", "mailto:", "tel:", "javascript:", "data:", "/web/",
+                "about:", "ftp:", "ws:", "wss:")
 
 
 def _skip(ref: str) -> bool:
@@ -28,21 +28,9 @@ def _skip(ref: str) -> bool:
 
 
 def _referenced(text: str, is_html: bool) -> list[str]:
-    out: list[str] = []
     if is_html:
-        for m in _URL_ATTR_RE.finditer(text):
-            attr_chunk = m.group(1).lower()
-            val = m.group(2)
-            if "srcset" in attr_chunk:
-                for part in val.split(","):
-                    tok = part.strip().split(None, 1)[0] if part.strip() else ""
-                    if tok:
-                        out.append(tok)
-            else:
-                out.append(val)
-    for m in _CSS_URL_RE.finditer(text):
-        out.append(m.group(2))
-    return out
+        return extract_html_refs(text)
+    return extract_css_refs(text)
 
 
 def _resolve(file_rel: str, ref: str) -> Optional[str]:
@@ -51,7 +39,6 @@ def _resolve(file_rel: str, ref: str) -> Optional[str]:
     ref = ref.split("#", 1)[0].split("?", 1)[0].strip()
     if not ref or _skip(ref):
         return None
-    # Absolute path → relative to snapshot root
     if ref.startswith("/"):
         target = ref.lstrip("/")
     else:
@@ -119,14 +106,33 @@ def _atomic_write(path: Path, data: dict) -> None:
             pass
 
 
+def _snapshot_mtime(snapshot_dir: Path) -> float:
+    """Latest mtime of any file in the snapshot, excluding the audit file
+    itself. Used to invalidate the audit cache after a repair run."""
+    latest = 0.0
+    for p in snapshot_dir.iterdir():
+        if p.name == AUDIT_NAME:
+            continue
+        try:
+            m = p.stat().st_mtime
+        except OSError:
+            continue
+        if m > latest:
+            latest = m
+    return latest
+
+
 def get_audit(snapshot_dir: Path, force: bool = False) -> dict:
-    """Return cached audit for a snapshot; recompute if missing/forced."""
+    """Return cached audit for a snapshot; recompute if missing, forced, or
+    when the snapshot has been modified since the audit was last written."""
     if not snapshot_dir.is_dir():
         return {"total_refs": 0, "present": 0, "missing": []}
     p = _audit_path(snapshot_dir)
     if p.is_file() and not force:
         try:
-            return json.loads(p.read_text())
+            audit_mtime = p.stat().st_mtime
+            if _snapshot_mtime(snapshot_dir) <= audit_mtime:
+                return json.loads(p.read_text())
         except Exception:
             pass
     result = audit_snapshot(snapshot_dir)

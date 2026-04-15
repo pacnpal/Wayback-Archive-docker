@@ -74,8 +74,17 @@
     <form method="post" action="/sites/{{host}}/audit">
       <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Audit all</button>
     </form>
+    <form method="post" action="/sites/{{host}}/cleanup-orphans"
+          onsubmit="return confirm('Move any stray files/dirs under {{host}}/ (anything that is NOT a 14-digit snapshot folder) into {{host}}/_orphaned/?\n\n(Reversible — nothing is deleted.)');">
+      <button type="submit" class="secondary" style="padding:.2rem .6rem;font-size:.85rem">Clean up orphans</button>
+    </form>
     {% endif %}
   </h3>
+  {% if request.query_params.get('cleanup_done') %}
+    <p class="status-ok"><strong>Done.</strong>
+      Quarantined {{ request.query_params.get('moved') or 0 }} orphan entr{% if request.query_params.get('moved') == '1' %}y{% else %}ies{% endif %} into <code>{{host}}/_orphaned/</code>.
+    </p>
+  {% endif %}
   {% if request.query_params.get('rewrite_done') %}
     <p class="status-ok"><strong>Done.</strong>
       Rewrote {{ request.query_params.get('refs_rewritten') }} absolute-path refs

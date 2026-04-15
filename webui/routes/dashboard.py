@@ -14,10 +14,15 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 # (flag, label, help, default)
 FLAG_GROUPS = [
     ("Optimization", [
-        ("OPTIMIZE_HTML", "Optimize HTML", "Clean + prettify archived HTML", True),
+        ("OPTIMIZE_HTML", "Optimize HTML", "Clean + prettify archived HTML (off by default — changes the bytes)", False),
         ("OPTIMIZE_IMAGES", "Optimize images", "Recompress JPEG/PNG to save space", False),
         ("MINIFY_JS", "Minify JS", "Shrink JavaScript files", False),
         ("MINIFY_CSS", "Minify CSS", "Shrink CSS files", False),
+    ]),
+    ("Shim options", [
+        ("USE_PLAYWRIGHT", "Render HTML via headless Chromium",
+         "Requires the wayback-archive:playwright image variant. Slower but captures SPA/JS-rendered content.",
+         False),
     ]),
     ("Content removal", [
         ("REMOVE_TRACKERS", "Remove trackers", "Strip analytics/tracking scripts", True),
@@ -40,13 +45,23 @@ RADIO_GROUPS = [
         ("", "Leave as-is", "Preserve the original external link", False),
     ]),
     ("Host canonicalization", "Unify www. and non-www. forms", "www_mode", [
-        ("MAKE_NON_WWW", "Force non-www", "Rewrite www.example.com → example.com", True),
+        ("MAKE_NON_WWW", "Force non-www", "Rewrite www.example.com → example.com", False),
         ("MAKE_WWW", "Force www", "Rewrite example.com → www.example.com", False),
-        ("", "Leave as-is", "Keep whichever form was archived", False),
+        ("", "Leave as-is", "Keep whichever form was archived (default — preserves byte faithfulness)", True),
     ]),
 ]
 
 RADIO_FLAGS = {flag for _, _, _, opts in RADIO_GROUPS for flag, _, _, _ in opts if flag}
+
+# Integer-valued flags rendered as <input type=number> instead of a checkbox.
+# Schema: (key, label, help, min, max, default_blank)
+NUMBER_FLAGS = [
+    ("FETCH_WORKERS", "Parallel asset prefetch",
+     "How many background threads speculatively fetch the next few URLs. "
+     "1 (default) keeps the current sequential behavior; higher values amortize "
+     "network RTT at the cost of Wayback rate-limit pressure.",
+     1, 16, ""),
+]
 
 
 def _flatten_flags():
@@ -67,6 +82,7 @@ async def index(request: Request):
         "request": request,
         "flag_groups": FLAG_GROUPS,
         "radio_groups": RADIO_GROUPS,
+        "number_flags": NUMBER_FLAGS,
         "max_concurrent": jobs.get_max_concurrent(),
     })
 
@@ -223,6 +239,11 @@ def _collect_flags(form: dict, *, submitted_form: bool = True) -> dict:
     mf = form.get("MAX_FILES")
     if mf and str(mf).strip().isdigit():
         out["MAX_FILES"] = str(mf).strip()
+    for key, _, _, lo, hi, _ in NUMBER_FLAGS:
+        v = (form.get(key) or "").strip()
+        if v and v.isdigit():
+            n = max(lo, min(hi, int(v)))
+            out[key] = str(n)
     return out
 
 

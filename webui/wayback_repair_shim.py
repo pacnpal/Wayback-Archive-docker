@@ -3,16 +3,12 @@ snapshot. Driven by REPAIR_PATHS env (comma-separated snapshot-relative
 paths). Uses upstream WaybackDownloader's download_file and writes to
 <OUTPUT_DIR>/<rel_path> atomically."""
 from __future__ import annotations
-import json
 import logging
 import os
 import sys
 import tempfile
 import time
-import urllib.parse
-import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 def _setup_logger() -> logging.Logger:
@@ -40,50 +36,7 @@ def _setup_logger() -> logging.Logger:
 log = _setup_logger()
 
 
-def _alt_timestamps(url: str, prefer_ts: str, limit: int = 20) -> list[str]:
-    """Ask Wayback CDX for other timestamps that archived this exact URL,
-    sorted by proximity to `prefer_ts` (most-likely-similar first)."""
-    params = {
-        "url": url,
-        "output": "json",
-        "limit": str(limit),
-        "fl": "timestamp,statuscode",
-        "filter": "statuscode:200",
-    }
-    q = urllib.parse.urlencode(params)
-    cdx = f"https://web.archive.org/cdx/search/cdx?{q}"
-    try:
-        req = urllib.request.Request(
-            cdx, headers={"User-Agent": "Wayback-Archive-Repair/1.0"}
-        )
-        with urllib.request.urlopen(req, timeout=15) as r:
-            data = json.load(r)
-    except Exception as e:
-        log.debug("cdx lookup failed url=%s err=%s", url, e)
-        return []
-    if not isinstance(data, list) or len(data) < 2:
-        return []
-    timestamps = [row[0] for row in data[1:] if row and row[0] != prefer_ts]
-    # Sort by absolute distance to prefer_ts
-    try:
-        key = int(prefer_ts)
-        timestamps.sort(key=lambda t: abs(int(t) - key))
-    except Exception:
-        pass
-    return timestamps
-
-
-def _download_from_wayback(session, ts: str, url: str) -> bytes | None:
-    """Pull a URL from Wayback at a specific timestamp using the raw `id_`
-    view (no HTML rewriting)."""
-    wb = f"https://web.archive.org/web/{ts}id_/{url}"
-    try:
-        r = session.get(wb, timeout=15, allow_redirects=True)
-        if r.status_code == 200 and r.content:
-            return r.content
-    except Exception:
-        pass
-    return None
+from .cdx import alt_timestamps as _alt_timestamps, raw_fetch as _download_from_wayback
 
 
 def _write_atomic(path: Path, data: bytes) -> None:

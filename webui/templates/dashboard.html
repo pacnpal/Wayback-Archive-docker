@@ -48,6 +48,15 @@
           <input type="number" name="MAX_FILES" min="1" placeholder="unlimited">
           <small class="opt-help">Stop after N files (blank = unlimited)</small>
         </label>
+        {% for key, label, help, lo, hi, default in number_flags %}
+        <label class="opt">
+          <span class="opt-label">{{ label }}</span>
+          <input type="number" name="{{ key }}" min="{{ lo }}" max="{{ hi }}"
+                 placeholder="{{ default or '1' }}"
+                 {% if default %}value="{{ default }}"{% endif %}>
+          <small class="opt-help">{{ help }}</small>
+        </label>
+        {% endfor %}
       </fieldset>
     </div>
   </details>

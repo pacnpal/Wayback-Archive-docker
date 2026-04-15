@@ -42,7 +42,7 @@ def _all_snapshots() -> list[dict]:
     root = jobs.OUTPUT_ROOT
     if not root.exists():
         return out
-    for h in (p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+    for h in (p for p in root.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
         idx = sites_index.get_index(h.name)
         for ts, meta in idx.items():
             if not sites_index.is_snapshot_ts(ts):
@@ -217,6 +217,9 @@ async def tree(request: Request, host: str, ts: str, path: str = ""):
         raise HTTPException(404)
     entries = []
     for p in sorted(cur.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        # Hide quarantine folders — they're visible only via their explicit routes.
+        if p.is_dir() and p.name == "_orphaned":
+            continue
         rel = str(p.relative_to(base))
         is_dir = p.is_dir()
         entries.append({
@@ -241,12 +244,24 @@ async def view(host: str, ts: str, path: str = "index.html"):
 
 
 @router.get("/sites/{host}/view/{ts}/{path:path}")
-async def view_path(host: str, ts: str, path: str = ""):
+async def view_path(request: Request, host: str, ts: str, path: str = ""):
     base = _host_dir(host) / ts
     f = _safe_path(base, path or "index.html")
     if f.is_dir():
         f = f / "index.html"
     if not f.exists():
+        # Fall back to the query-hashed filename when the archived page
+        # references a URL with a query string. The shim's _get_local_path
+        # stores `foo.png?v=1` as `foo.q-<hash>.png`; FastAPI strips the
+        # query from the path parameter, so we recompute it here.
+        query = request.url.query
+        if query:
+            from ..query_hash import suffix_for_query
+            suffix = suffix_for_query(query)
+            if suffix and f.suffix:
+                candidate = f.with_name(f.stem + suffix + f.suffix)
+                if candidate.is_file():
+                    return FileResponse(candidate)
         raise HTTPException(404)
     return FileResponse(f)
 
