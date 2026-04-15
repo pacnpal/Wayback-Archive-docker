@@ -256,10 +256,7 @@ async def audit_details(request: Request, host: str, ts: str):
 
 @router.post("/sites/{host}/recover-missing")
 async def recover_missing(host: str):
-    """Sweep every snapshot; queue a repair job per snapshot with all of its
-    currently-missing refs. The repair shim's widened CDX fallback chases up
-    to 30 alt timestamps per asset and marks persistently-unrecoverable
-    paths so future runs skip them."""
+    """Queue a repair job per snapshot with every currently-missing ref."""
     host = valid_host(host)
     host_dir = safe_output_child(host)
     if not host_dir.is_dir():

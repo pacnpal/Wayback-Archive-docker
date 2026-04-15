@@ -12,6 +12,21 @@ AUDIT_NAME = ".audit.json"
 UNRECOVERABLE_NAME = ".unrecoverable.json"
 
 
+def _atomic_write(path: Path, data) -> None:
+    """Atomic JSON write via same-dir tempfile + rename. Used for both
+    the audit and unrecoverable-set sidecars."""
+    fd, tmp = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
+
+
 def _load_unrecoverable(snapshot_dir: Path) -> set[str]:
     """Paths that a prior repair run exhausted CDX for. Skipped by future
     repair queues to avoid thrashing the API on known-dead URLs."""
@@ -111,19 +126,6 @@ def audit_snapshot(snapshot_dir: Path) -> dict:
 
 def _audit_path(snapshot_dir: Path) -> Path:
     return snapshot_dir / AUDIT_NAME
-
-
-def _atomic_write(path: Path, data: dict) -> None:
-    fd, tmp = tempfile.mkstemp(prefix=".audit.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, str(path))
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
 
 
 def _snapshot_mtime(snapshot_dir: Path) -> float:

@@ -72,14 +72,9 @@ _TRACKER_SRC_RE = re.compile(
 
 
 def _strip_trackers_and_referrer(soup) -> int:
-    """Archive-time hardening:
-      * remove <script src> pointing at known tracker/analytics CDNs
-        (idempotent — no-op on pages without them),
-      * prepend <meta name=referrer content=no-referrer> to <head> so
-        outbound link clicks from the viewer don't leak Referer headers
-        to whatever third-party domains the archived page links to.
-    Returns count of modifications.
-    """
+    """Remove known tracker/analytics <script src> tags and prepend a
+    no-referrer policy meta to <head>. Idempotent — existing referrer
+    policies are preserved."""
     hits = 0
     for script in soup.find_all("script", src=True):
         src = (script.get("src") or "").strip()
@@ -89,16 +84,11 @@ def _strip_trackers_and_referrer(soup) -> int:
     head = soup.find("head")
     if head is not None and not head.find(
             "meta", attrs={"name": "referrer"}):
-        # Insert at the top of head to take precedence over any later
-        # referrer policy meta tags the page might declare.
-        from bs4 import BeautifulSoup as _BS
-        meta = _BS(
-            '<meta name="referrer" content="no-referrer">',
-            "html.parser",
-        ).meta
-        if meta is not None:
-            head.insert(0, meta)
-            hits += 1
+        meta = soup.new_tag("meta", attrs={
+            "name": "referrer", "content": "no-referrer",
+        })
+        head.insert(0, meta)
+        hits += 1
     return hits
 
 
@@ -240,19 +230,30 @@ def _get_base_href(soup) -> str:
 
 
 def _apply_base(ref: str, base_href: str) -> str:
-    """Resolve `ref` against `base_href` if base is set and ref is relative.
-    Absolute refs (scheme:// or leading /) are returned unchanged."""
-    if not base_href or not ref:
-        return ref
-    if "://" in ref or ref.startswith(("/", "#", "mailto:", "tel:",
-                                        "javascript:", "data:")):
+    """Resolve `ref` against `base_href` if set. Fragment-only refs stay as
+    same-page anchors; urljoin handles scheme / absolute-path / data / mailto
+    preservation itself."""
+    if not base_href or not ref or ref.startswith("#"):
         return ref
     from urllib.parse import urljoin
-    # urljoin handles both full-URL bases and relative-path bases.
     try:
         return urljoin(base_href, ref)
     except Exception:
         return ref
+
+
+def _apply_base_srcset(val: str, base_href: str) -> str:
+    """Apply _apply_base to each candidate in a srcset-shaped string while
+    preserving the descriptors (`1x`, `300w`, etc)."""
+    out = []
+    for piece in val.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        bits = piece.split(None, 1)
+        bits[0] = _apply_base(bits[0], base_href)
+        out.append(" ".join(bits))
+    return ", ".join(out)
 
 
 def extract_html_refs(html: str) -> list[str]:
@@ -310,9 +311,6 @@ def extract_html_refs(html: str) -> list[str]:
             if _looks_like_url(tok):
                 refs.append(tok)
 
-    # If the page declared a <base href>, pre-resolve every relative ref
-    # against it so downstream consumers (audit, rewriter) see the same URL
-    # a real browser would fetch.
     if base_href:
         refs = [_apply_base(r, base_href) for r in refs]
     return refs
@@ -443,10 +441,8 @@ def rewrite_html(html: str, file_rel_dir: str,
         soup = BeautifulSoup(html, "html.parser")
     hits = 0
 
-    # <base href>: pre-join relative ref values against it before the usual
-    # absolute→relative rewrite. After we've absolutized everything, the
-    # <base> tag itself is redundant — remove it so the browser doesn't
-    # re-apply it at render time against whatever the viewer's URL is.
+    # Remove <base> after absolutizing — the browser would otherwise re-apply
+    # it at render time against whatever the viewer URL happens to be.
     base_href = _get_base_href(soup)
     if base_href:
         for base_tag in soup.find_all("base", href=True):
@@ -461,23 +457,12 @@ def rewrite_html(html: str, file_rel_dir: str,
             val = tag.get(attr)
             if not isinstance(val, str):
                 continue
-            # Apply <base href> first so a relative ref becomes absolute
-            # before the usual abs→rel pass.
+            original = val
             if base_href:
-                if is_srcset:
-                    parts = []
-                    for piece in val.split(","):
-                        piece = piece.strip()
-                        if not piece:
-                            continue
-                        bits = piece.split(None, 1)
-                        bits[0] = _apply_base(bits[0], base_href)
-                        parts.append(" ".join(bits))
-                    val = ", ".join(parts)
-                else:
-                    val = _apply_base(val, base_href)
+                val = (_apply_base_srcset(val, base_href) if is_srcset
+                       else _apply_base(val, base_href))
             new, h = _rewrite_attr(val, file_rel_dir, is_srcset)
-            if h or (base_href and val != tag.get(attr)):
+            if h or val != original:
                 tag[attr] = new
                 hits += max(h, 1)
 

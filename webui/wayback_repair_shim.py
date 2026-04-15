@@ -10,8 +10,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
+from .asset_audit import UNRECOVERABLE_NAME, _atomic_write as _atomic_write_json
 from .wayback_resume_shim import _looks_like_html_error, _url_ext
 
 
@@ -150,21 +150,17 @@ def main() -> int:
             log.warning("write failed rel=%s err=%s", rel, e)
             failed += 1
 
-    # Persist the unrecoverable set so future audits can skip CDX for them.
     if unrecoverable:
-        unrec_path = Path(out_dir) / ".unrecoverable.json"
-        try:
-            existing: list[str] = []
-            if unrec_path.is_file():
-                try:
-                    existing = json.loads(unrec_path.read_text())
-                except Exception:
-                    existing = []
-            merged = sorted(set(existing) | set(unrecoverable))
-            unrec_path.write_text(json.dumps(merged))
-            log.info("unrecoverable set size=%d written=%s", len(merged), unrec_path)
-        except OSError as e:
-            log.warning("write unrecoverable set failed: %s", e)
+        unrec_path = Path(out_dir) / UNRECOVERABLE_NAME
+        existing: list[str] = []
+        if unrec_path.is_file():
+            try:
+                existing = json.loads(unrec_path.read_text())
+            except Exception:
+                pass
+        merged = sorted(set(existing) | set(unrecoverable))
+        _atomic_write_json(unrec_path, merged)
+        log.info("unrecoverable set size=%d written=%s", len(merged), unrec_path)
 
     dur = time.monotonic() - t0
     print(f"\n{'='*70}\nRepair complete\nFiles successfully downloaded: {ok}\n"
