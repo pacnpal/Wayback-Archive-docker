@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
@@ -10,6 +11,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+# Lines emitted by webui.wayback_resume_shim's logger already start with an
+# ISO8601 timestamp (its fmt is "%(asctime)s ... " with datefmt
+# "%Y-%m-%dT%H:%M:%SZ"). Don't double-stamp those.
+_TS_LINE_RE = re.compile(rb"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?\s")
 
 from . import wayback
 
@@ -346,6 +352,27 @@ def cancel_job(job_id: int) -> bool:
     return False
 
 
+async def _pump_log_with_timestamps(
+    reader: asyncio.StreamReader, log_f
+) -> None:
+    """Read subprocess stdout line-by-line and append each line to log_f
+    prefixed with a wall-clock timestamp. Lines that already start with an
+    ISO8601 timestamp (the shim's own logger) pass through unchanged so we
+    don't double-stamp them."""
+    while True:
+        try:
+            line = await reader.readuntil(b"\n")
+        except asyncio.IncompleteReadError as e:
+            # Subprocess closed without a trailing newline — flush what's left.
+            if e.partial:
+                log_f.write(e.partial)
+            return
+        if _TS_LINE_RE.match(line):
+            log_f.write(line)
+        else:
+            log_f.write(now_iso().encode() + b" " + line)
+
+
 async def _run_one(job: sqlite3.Row) -> None:
     Path(job["site_dir"]).mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
@@ -385,12 +412,25 @@ async def _run_one(job: sqlite3.Row) -> None:
     logger.info("start job=%d host=%s ts=%s", job["id"], job["host"], job["timestamp"])
     log_f = open(job["log_path"], "ab", buffering=0)
     try:
+        # `-u` forces line-buffered stdout so the pump doesn't sit on a 4KB
+        # block waiting for it to fill. limit=1MB lets the StreamReader hold
+        # very long lines (e.g. JSON dumps from upstream) without raising.
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", entry_module,
-            env=env, stdout=log_f, stderr=asyncio.subprocess.STDOUT,
+            sys.executable, "-u", "-m", entry_module,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            limit=1 << 20,
         )
         _running[job["id"]] = proc
+        pump = asyncio.create_task(_pump_log_with_timestamps(proc.stdout, log_f))
         rc = await proc.wait()
+        # Drain any lines still buffered in the pipe after the subprocess
+        # exited. Bounded wait so a stuck pump can't hang the worker.
+        try:
+            await asyncio.wait_for(pump, timeout=10.0)
+        except asyncio.TimeoutError:
+            pump.cancel()
     finally:
         log_f.close()
         _running.pop(job["id"], None)
@@ -470,7 +510,7 @@ async def _run_job(row):
             )
         try:
             with open(row["log_path"], "a") as f:
-                f.write(f"\n[dashboard] worker error: {e}\n")
+                f.write(f"\n{now_iso()} [dashboard] worker error: {e}\n")
         except Exception:
             pass
 
