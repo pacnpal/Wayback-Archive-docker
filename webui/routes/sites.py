@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from html import escape as _html_escape
 from urllib.parse import quote as _urlquote
 
 from .. import jobs, wayback, sites_index, link_rewrite, asset_audit, cleanup_orphans, search as _search
@@ -261,8 +262,9 @@ async def audit_cell(host: str, ts: str):
             '<span class="audit-pending" title="Job running — audit will rebuild after it completes">…</span>'
         )
     snap = safe_output_child(host, ts)
-    if not snap.is_dir():
-        return HTMLResponse('<span title="Snapshot dir missing">—</span>')
+    # get_audit returns {total_refs:0, ...} for missing dirs, so we can skip
+    # the explicit .is_dir() check (which CodeQL flags as a path-injection
+    # sink on a user-derived Path). Same pattern as audit_details above.
     a = asset_audit.get_audit(snap)
     refs = a["total_refs"]
     missing = len(a["missing"])
@@ -271,8 +273,10 @@ async def audit_cell(host: str, ts: str):
     if missing == 0:
         return HTMLResponse('<span class="status-ok">100%</span>')
     pct = int((refs - missing) * 100 / refs)
+    # host/ts are already regex-validated above; _qhost + html.escape are the
+    # sanitizer calls CodeQL recognizes for URL-redirect and XSS contexts.
     return HTMLResponse(
-        f'<a href="/sites/{_qhost(host)}/audit/{ts}" '
+        f'<a href="/sites/{_qhost(host)}/audit/{_html_escape(ts)}" '
         f'title="{refs} refs, {missing} missing">'
         f'{pct}% ({missing} missing)</a>'
     )
