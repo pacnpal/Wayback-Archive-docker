@@ -273,10 +273,14 @@ async def audit_cell(host: str, ts: str):
     if missing == 0:
         return HTMLResponse('<span class="status-ok">100%</span>')
     pct = int((refs - missing) * 100 / refs)
-    # host/ts are already regex-validated above; _qhost + html.escape are the
-    # sanitizer calls CodeQL recognizes for URL-redirect and XSS contexts.
+    # host/ts are already regex-validated above. We still layer the explicit
+    # sanitizers CodeQL recognizes: _qhost (url-quote) for URL-redirect
+    # context, and html.escape on top for reflected-XSS context — quote's
+    # output is URL-safe but isn't on CodeQL's XSS-sanitizer list.
+    safe_host = _html_escape(_qhost(host))
+    safe_ts = _html_escape(ts)
     return HTMLResponse(
-        f'<a href="/sites/{_qhost(host)}/audit/{_html_escape(ts)}" '
+        f'<a href="/sites/{safe_host}/audit/{safe_ts}" '
         f'title="{refs} refs, {missing} missing">'
         f'{pct}% ({missing} missing)</a>'
     )
