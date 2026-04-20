@@ -25,9 +25,10 @@
             onclick="saveProbeTimeout(this,'top-probe-timeout','top-probe-timeout-msg')">Save</button>
     <small id="top-probe-timeout-msg" style="color:var(--pico-muted-color)"></small>
     <small class="opt-help" style="margin-left:auto">
-      Per-request timeout for the CDX heartbeat probe (1–120 s, default 15).
-      Raise if IA is slow-but-reachable and probes are timing out; leave at default
-      if IA silently drops packets — longer won't help.
+      Per-request timeout for the CDX heartbeat probe (1–120 s, default 45).
+      IA occasionally takes ~30 s to serve a trivial CDX lookup; the default
+      leaves headroom above that. Longer won't help when IA silently drops
+      packets (per-IP block).
     </small>
   </label>
 </fieldset>

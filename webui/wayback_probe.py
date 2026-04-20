@@ -31,7 +31,10 @@ PROBE_URL = (
     "https://web.archive.org/cdx/search/cdx"
     "?url=example.com&limit=1&output=json"
 )
-PROBE_TIMEOUT = 15.0    # default seconds per probe request; overridable via settings
+PROBE_TIMEOUT = 45.0    # default seconds per probe request; overridable via settings.
+# IA's CDX occasionally serves trivial 1-row lookups in ~30s during slow
+# periods. 45s leaves headroom above that and still sits below the 60s
+# probe interval, so back-to-back probes don't overlap.
 PROBE_TIMEOUT_MIN = 1.0
 PROBE_TIMEOUT_MAX = 120.0
 PROBE_INTERVAL = 60.0
