@@ -3,9 +3,10 @@
 Runs a cheap CDX query on a schedule and tracks up/down state with
 hysteresis so a single blip doesn't pause the worker. When CDX is down,
 ``webui.jobs.worker_loop`` stops popping new work; in-flight jobs that
-fail during the outage are rescheduled with exponential backoff (6h →
-12h → 24h). When CDX comes back up, deferred jobs are released in one
-pass.
+fail during the outage are rescheduled using the ``_BACKOFF_MINUTES``
+sequence (5m, 10m, 15m, 20m, 30m, 45m, 60m, 120m, 240m, 480m, 960m,
+capping at 24h). When CDX comes back up, deferred jobs are released in
+one pass.
 
 State lives in the ``settings`` table (``wayback_state``,
 ``wayback_state_since``) so it survives restarts and is visible to the

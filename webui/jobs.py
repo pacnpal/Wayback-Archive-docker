@@ -112,8 +112,12 @@ def init_db() -> None:
         ):
             try:
                 c.execute(ddl)
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as e:
+                msg = str(e).lower()
+                if "duplicate column" in msg:
+                    pass
+                else:
+                    raise
         # Recover orphans: jobs that were mid-run when the container stopped
         # go back to pending so the worker picks them up again on startup.
         orphans = [r[0] for r in c.execute(
@@ -372,7 +376,8 @@ def earliest_deferred_not_before() -> Optional[str]:
     with connect() as c:
         row = c.execute(
             "SELECT MIN(not_before) AS nb FROM jobs "
-            "WHERE status='pending' AND not_before IS NOT NULL"
+            "WHERE status='pending' AND not_before IS NOT NULL "
+            "AND not_before > CURRENT_TIMESTAMP"
         ).fetchone()
     return row["nb"] if row and row["nb"] else None
 
