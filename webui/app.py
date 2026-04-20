@@ -16,7 +16,7 @@ GITHUB_URL = "https://github.com/pacnpal/Wayback-Archive-Dashboard"
 
 import asyncio as _asyncio
 import json as _json
-from . import jobs, scheduler, log as log_mod, job_progress, events_bus, wayback_probe
+from . import jobs, scheduler, log as log_mod, job_progress, events_bus
 from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes, events as events_routes
 
 BASE = Path(__file__).parent
@@ -38,20 +38,19 @@ async def lifespan(app: FastAPI):
         boot.debug("boot env (selected keys): %s", redacted)
         boot.debug("DB path=%s", jobs.DB_PATH)
     jobs.init_db()
-    boot.debug("db initialized — starting worker/scheduler/progress/probe tasks")
+    boot.debug("db initialized — starting worker/scheduler/progress tasks")
     stop = asyncio.Event()
     t1 = asyncio.create_task(jobs.worker_loop(stop))
     t2 = asyncio.create_task(scheduler.scheduler_loop(stop))
     t3 = asyncio.create_task(_progress_logger(stop))
-    t4 = asyncio.create_task(wayback_probe.probe_loop(stop))
-    boot.debug("background tasks launched: worker=%s scheduler=%s progress=%s probe=%s",
-               t1.get_name(), t2.get_name(), t3.get_name(), t4.get_name())
+    boot.debug("background tasks launched: worker=%s scheduler=%s progress=%s",
+               t1.get_name(), t2.get_name(), t3.get_name())
     try:
         yield
     finally:
         boot.info("shutdown signaling stop event")
         stop.set()
-        await asyncio.gather(t1, t2, t3, t4, return_exceptions=True)
+        await asyncio.gather(t1, t2, t3, return_exceptions=True)
         boot.debug("shutdown all background tasks joined")
 
 
@@ -70,7 +69,7 @@ async def _progress_logger(stop: _asyncio.Event) -> None:
                     "SELECT id, host, timestamp, log_path, flags_json "
                     "FROM jobs WHERE status='running' ORDER BY id"
                 ).fetchall()
-            lg.debug("progress tick=%d heartbeat running=%d", tick, len(rows))
+            lg.debug("progress tick=%d running=%d", tick, len(rows))
             if rows:
                 events_bus.publish("jobs-changed")
                 for r in rows:

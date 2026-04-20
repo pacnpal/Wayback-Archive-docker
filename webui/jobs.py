@@ -23,11 +23,25 @@ OUTPUT_ROOT = Path(os.environ.get("OUTPUT_DIR", "/app/output"))
 DB_PATH = OUTPUT_ROOT / ".dashboard.db"
 
 
+# Hard ceiling on concurrent archive jobs. This is NOT a user
+# preference — it's a cap that protects Internet Archive (and us)
+# from bursting into rate-limit territory on the playback endpoint.
+# Each concurrent job may fan out to FETCH_WORKERS parallel playback
+# fetches, so MAX × FETCH is the real wall-clock request pressure.
+# The CDX endpoint is independently rate-gated in webui.rate_limit at
+# 50 req/min no matter how high this is, so the cap here is purely
+# to keep playback traffic inside sane bounds. Clamped in
+# get_max_concurrent() so DB-level tampering or a stale settings row
+# can't bypass the ceiling.
+MAX_CONCURRENT_CEILING = 10
+
+
 def _max_concurrent() -> int:
     try:
-        return max(1, int(os.environ.get("MAX_CONCURRENT", "3")))
+        v = max(1, int(os.environ.get("MAX_CONCURRENT", "3")))
     except ValueError:
         return 3
+    return min(v, MAX_CONCURRENT_CEILING)
 
 
 MAX_CONCURRENT_DEFAULT = _max_concurrent()
@@ -524,6 +538,20 @@ async def _run_one(job: sqlite3.Row) -> None:
     for k, v in user_flags.items():
         if k in UPSTREAM_FLAGS and v not in (None, ""):
             env[k] = str(v)
+    # Hard cap per-job prefetch parallelism. MAX_CONCURRENT jobs ×
+    # FETCH_WORKERS threads defines the total playback-request
+    # pressure we can put on Internet Archive. The CDX gate
+    # independently caps CDX traffic, but playback is only protected
+    # by keeping these two numbers sane. Enforced here (not just in
+    # the dashboard input) so a flag passed via the API, a legacy DB
+    # row, or the enqueue form cannot exceed the ceiling.
+    FETCH_WORKERS_CEILING = 8
+    fw_raw = env.get("FETCH_WORKERS")
+    if fw_raw:
+        try:
+            env["FETCH_WORKERS"] = str(max(1, min(FETCH_WORKERS_CEILING, int(fw_raw))))
+        except ValueError:
+            env.pop("FETCH_WORKERS", None)
     # Repair mode: spawn the repair shim instead of the resume shim.
     repair_raw = None
     try:
@@ -679,13 +707,13 @@ def set_setting(key: str, value: str) -> None:
 def get_max_concurrent() -> int:
     raw = get_setting("max_concurrent", str(MAX_CONCURRENT_DEFAULT))
     try:
-        v = max(1, min(20, int(raw)))
+        v = max(1, min(MAX_CONCURRENT_CEILING, int(raw)))
     except ValueError:
         v = MAX_CONCURRENT_DEFAULT
     # Noisy — worker_loop calls this every tick — keep at DEBUG only.
     if _log.is_debug():
-        logger.debug("get_max_concurrent raw=%r -> %d (default=%d)",
-                     raw, v, MAX_CONCURRENT_DEFAULT)
+        logger.debug("get_max_concurrent raw=%r -> %d (default=%d ceiling=%d)",
+                     raw, v, MAX_CONCURRENT_DEFAULT, MAX_CONCURRENT_CEILING)
     return v
 
 
@@ -722,7 +750,7 @@ async def worker_loop(stop: asyncio.Event) -> None:
         # per tick. This is where `max_concurrent` is actually enforced.
         headroom = max(0, limit - len(active))
         logger.debug(
-            "worker tick=%d heartbeat limit=%d active=%d headroom=%d",
+            "worker tick=%d limit=%d active=%d headroom=%d",
             tick, limit, len(active), headroom,
         )
         if headroom == 0:

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, wayback_probe
+from .. import jobs, wayback, wayback_probe, rate_limit
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -60,9 +60,10 @@ NUMBER_FLAGS = [
      "How many background threads speculatively fetch asset URLs within THIS "
      "job (default 4; 1 = sequential). Stacks with the global \"Jobs in "
      "parallel\" setting at the top of the page — e.g. 3 jobs × 4 prefetch "
-     "threads = up to 12 concurrent Wayback requests. Higher values trade "
-     "rate-limit pressure for lower wall-clock.",
-     1, 16, ""),
+     "threads = up to 12 concurrent Wayback requests. Hard-capped at 8 "
+     "server-side to keep total playback pressure bounded; the CDX gate "
+     "independently caps CDX traffic at 50 req/min.",
+     1, 8, ""),
 ]
 
 
@@ -86,7 +87,6 @@ async def index(request: Request):
         "radio_groups": RADIO_GROUPS,
         "number_flags": NUMBER_FLAGS,
         "max_concurrent": jobs.get_max_concurrent(),
-        "wayback_probe_timeout": wayback_probe.get_probe_timeout(),
     })
 
 
@@ -199,19 +199,10 @@ async def jobs_list(request: Request, page: int = 1, per_page: int = 0,
 async def set_max_concurrent(request: Request):
     form = await request.form()
     try:
-        n = max(1, min(20, int(form.get("max_concurrent") or 3)))
+        n = max(1, min(jobs.MAX_CONCURRENT_CEILING, int(form.get("max_concurrent") or 3)))
     except ValueError:
         n = 3
     jobs.set_setting("max_concurrent", str(n))
-    return RedirectResponse("/", status_code=303)
-
-
-@router.post("/settings/wayback-probe-timeout")
-async def set_wayback_probe_timeout(request: Request):
-    form = await request.form()
-    # set_probe_timeout handles None/empty/non-numeric/out-of-range on
-    # its own — the route just forwards the raw form value.
-    wayback_probe.set_probe_timeout(form.get("timeout"))
     return RedirectResponse("/", status_code=303)
 
 
@@ -343,25 +334,16 @@ async def cancel(job_id: int):
     return RedirectResponse("/", status_code=303)
 
 
-@router.post("/api/wayback-probe/retry", response_class=HTMLResponse)
-async def api_wayback_retry(request: Request):
-    """Run one probe on demand (user clicked 'Try now'). Only meaningful
-    while state=='down' — the button is gated by that, but guard the
-    endpoint too so a stale page or a direct curl can't burn a probe or
-    spin up network traffic we don't need."""
-    import asyncio
-    if wayback_probe.load_state().state != "down":
-        # Graceful no-op: render the current (empty) banner partial so
-        # any stale client DOM gets cleared out in the same swap.
-        return await api_wayback_status(request)
-    await asyncio.to_thread(wayback_probe.run_probe_and_update)
-    # Delegate rendering to the GET handler so both paths stay in sync.
-    return await api_wayback_status(request)
-
-
 @router.get("/api/wayback-status", response_class=HTMLResponse)
 async def api_wayback_status(request: Request):
-    """Partial: wayback probe banner. Empty when state != 'down'."""
+    """Partial: wayback outage banner. Empty when state != 'down'.
+
+    State is now driven passively by ``webui.rate_limit`` — the banner
+    reflects real request outcomes (429s / connection failures seen by
+    actual job traffic) instead of a separate heartbeat probe. The
+    ``clear_at`` field shows when the active rate-limit hard block
+    expires so the user has an accurate ETA instead of the old "any
+    moment now" placeholder."""
     from datetime import datetime, timezone
     status = wayback_probe.get_status()
     if status["state"] != "down":
@@ -385,6 +367,8 @@ async def api_wayback_status(request: Request):
     since_dt = _parse_utc(status.get("since"))
     next_retry = jobs.earliest_deferred_not_before()
     next_retry_dt = _parse_utc(next_retry)
+    rl_status = rate_limit.get_status()
+    clear_at_dt = _parse_utc(rl_status.get("block_until"))
     now = datetime.now(timezone.utc)
 
     def _human_delta(target: "datetime | None") -> str:
@@ -413,6 +397,9 @@ async def api_wayback_status(request: Request):
         "down_for": down_for,
         "next_retry_human": _human_delta(next_retry_dt),
         "next_retry_iso": next_retry,
+        "clear_at_human": _human_delta(clear_at_dt),
+        "clear_at_iso": rl_status.get("block_until"),
+        "block_tier": rl_status.get("block_tier"),
     })
 
 

@@ -1,22 +1,62 @@
-{# Shown only when wayback_probe state == "down". Parent <div> is
-   always present in base.html so SSE-driven htmx swaps target a stable
-   node; content goes empty when Wayback is up. #}
-<div class="wayback-banner" role="alert">
-  <strong>Internet Archive unreachable.</strong>
-  The dashboard has paused new jobs
-  {% if down_for %}(down for {{ down_for }}){% endif %}
-  and is probing CDX every 60s.
-  {% if next_retry_human %}
-    Next deferred-job retry in <strong>{{ next_retry_human }}</strong>
-    <span class="banner-next-iso" title="{{ next_retry_iso }}"></span>.
+{# Shown only when wayback state == "down". State is driven passively
+   by real request outcomes (429 → exponential hard block). The
+   [data-countdown-iso] element ticks every second in base.html and
+   triggers a banner refresh when it hits zero. #}
+<div class="wayback-banner{% if block_tier and block_tier >= 2 %} wayback-banner--severe{% endif %}"
+     role="alert">
+  {% if clear_at_iso %}
+    <strong>⛔ Rate-limited by Internet Archive.</strong>
+    Internet Archive returned <code>429 Too Many Requests</code>.
+    All CDX traffic is locked out until the ban clears.
+    <div class="banner-countdown">
+      Cooldown clears in
+      <strong data-countdown-iso="{{ clear_at_iso }}"
+              title="{{ clear_at_iso }}">{{ clear_at_human }}</strong>
+    </div>
+    {% if block_tier and block_tier >= 2 %}
+      <div class="banner-stern">
+        <strong>⚠️ This is offense #{{ block_tier }}.</strong>
+        You are making this <em>worse</em>, not better. Internet
+        Archive doubles the ban every time — 1h → 2h → 4h → 8h →
+        16h and up. Keep ignoring the rate limit and you will be
+        locked out of CDX for <em>days</em>, not hours, and every
+        other user on your IP gets banned with you.
+        <br>
+        <strong>Stop queueing new jobs.</strong> Stop clicking
+        retry. Wait for the timer. Each new 429 doubles the wait.
+      </div>
+    {% else %}
+      <div class="banner-stern">
+        <strong>Heads up:</strong> a fresh 429 locks out CDX for a
+        full 60 minutes. Internet Archive <em>doubles</em> the ban
+        on every subsequent offense (1h → 2h → 4h → 8h …). Do
+        <em>not</em> queue more jobs, refresh the page in a tight
+        loop, or try to "work around" the cooldown — every request
+        you send while banned extends the ban.
+      </div>
+    {% endif %}
+    <div class="banner-reassure">
+      New archive jobs are paused. In-flight jobs that fail during
+      the block are automatically requeued with escalating backoff —
+      the dashboard handles this. You just have to wait.
+    </div>
+  {% else %}
+    <strong>Internet Archive unreachable.</strong>
+    The dashboard has paused new jobs
+    {% if down_for %}(down for {{ down_for }}){% endif %}.
+    {% if next_retry_iso %}
+      Next deferred-job retry in
+      <strong data-countdown-iso="{{ next_retry_iso }}"
+              title="{{ next_retry_iso }}">{{ next_retry_human }}</strong>.
+    {% endif %}
+    Outage state is driven passively by real request outcomes — the
+    banner will clear as soon as a CDX request succeeds again.
   {% endif %}
-  <button type="button"
-          class="banner-retry"
-          hx-post="/api/wayback-probe/retry"
-          hx-target="#wayback-banner-slot"
-          hx-swap="innerHTML"
-          hx-indicator="this">Try now</button>
   <span class="banner-counts">
-    consecutive fails: {{ status.consecutive_fails }}
+    {% if block_tier and block_tier > 0 %}
+      block tier: {{ block_tier }}
+    {% else %}
+      consecutive fails: {{ status.consecutive_fails }}
+    {% endif %}
   </span>
 </div>

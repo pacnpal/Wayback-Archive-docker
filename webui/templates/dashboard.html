@@ -4,31 +4,15 @@
 <fieldset class="opt-group" style="margin-bottom:1rem">
   <legend>Global: jobs in parallel</legend>
   <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
-    <input type="number" id="top-parallel" min="1" max="20" value="{{ max_concurrent }}" style="width:5rem">
+    <input type="number" id="top-parallel" min="1" max="10" value="{{ max_concurrent }}" style="width:5rem">
     <button type="button" class="secondary" style="padding:.2rem .6rem"
             onclick="saveConcurrency(this,'top-parallel','top-parallel-msg')">Save</button>
     <small id="top-parallel-msg" style="color:var(--pico-muted-color)"></small>
     <small class="opt-help" style="margin-left:auto">
-      How many whole jobs (snapshots) run at once (1–20). Global setting — picks up for new jobs immediately.
-      Distinct from the per-job "asset prefetch threads" flag in the Options block below.
-    </small>
-  </label>
-</fieldset>
-
-<fieldset class="opt-group" style="margin-bottom:1rem">
-  <legend>Global: Wayback probe timeout</legend>
-  <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
-    <input type="number" id="top-probe-timeout" min="1" max="120" step="1"
-           value="{{ wayback_probe_timeout }}" style="width:5rem">
-    <span style="color:var(--pico-muted-color)">s</span>
-    <button type="button" class="secondary" style="padding:.2rem .6rem"
-            onclick="saveProbeTimeout(this,'top-probe-timeout','top-probe-timeout-msg')">Save</button>
-    <small id="top-probe-timeout-msg" style="color:var(--pico-muted-color)"></small>
-    <small class="opt-help" style="margin-left:auto">
-      Per-request timeout for the CDX heartbeat probe (1–120 s, default 45).
-      IA occasionally takes ~30 s to serve a trivial CDX lookup; the default
-      leaves headroom above that. Longer won't help when IA silently drops
-      packets (per-IP block).
+      How many whole jobs (snapshots) run at once (1–10, hard-capped).
+      Distinct from the per-job "asset prefetch threads" below.
+      CDX requests are independently rate-gated at 50 req/min —
+      no combination of settings can push past Internet Archive's 60 req/min cap.
     </small>
   </label>
 </fieldset>
@@ -150,9 +134,6 @@
     }
     async function saveConcurrency(btn, inputId, msgId) {
       return saveSetting(btn, inputId, msgId, '/settings/max-concurrent', 'max_concurrent');
-    }
-    async function saveProbeTimeout(btn, inputId, msgId) {
-      return saveSetting(btn, inputId, msgId, '/settings/wayback-probe-timeout', 'timeout');
     }
     </script>
     <small>Uses the default option flags. Edit individual jobs afterward if needed.</small><br>

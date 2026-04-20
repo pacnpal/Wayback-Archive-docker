@@ -1,50 +1,49 @@
-"""Heartbeat probe for web.archive.org CDX.
+"""Outage-state helpers for the Wayback worker gate.
 
-Runs a cheap CDX query on a schedule and tracks up/down state with
-hysteresis so a single blip doesn't pause the worker. When CDX is down,
-``webui.jobs.worker_loop`` stops popping new work; in-flight jobs that
-fail during the outage are rescheduled with an escalating backoff
-(5/10/15/20/30/45/60/120 min, then doubling 240/480/960, capped at 24h).
-When CDX comes back up, deferred jobs are released in one pass.
+This module used to run an active heartbeat probe against CDX on a
+60-second cadence. That heartbeat was itself CDX traffic we had to
+budget around IA's 60 req/min ceiling, and a user mashing the "Try
+now" button could push us closer to a 429. Both paths are now gone:
+state transitions are driven passively by ``webui.rate_limit`` from
+the outcome of real caller traffic (``observe_ok`` / ``observe_429``).
 
-State lives in the ``settings`` table under the keys
-``wayback_probe_state`` (JSON with ``state``/``consecutive_fails``/
-``consecutive_ok``) and ``wayback_state_since`` (ISO timestamp of the
-last flip). It survives restarts and is visible to the dashboard banner.
+What stays here:
+
+- ``ProbeState`` + ``load_state`` / ``save_state`` — persisted state
+  flags consumed by ``is_wayback_up`` below and by the dashboard
+  banner.
+- ``is_wayback_up`` — fail-open gate: "True unless state=='down'".
+  The worker loop consults this before popping pending jobs; when a
+  429 has installed a hard block, this returns False and jobs that
+  fail during the block get deferred via the escalating-backoff
+  machinery. When the block expires, a successful CDX call flips the
+  state back up and ``release_deferred()`` drains the queue.
+- ``backoff_seconds`` — the escalating retry schedule used by
+  ``jobs.defer_for_outage`` (5/10/15/20/30/45/60/120m, doubling,
+  capped at 24h). Unchanged.
+- ``get_status`` — snapshot used by ``/api/wayback-status``.
+
+The ``FAIL_THRESHOLD`` / ``OK_THRESHOLD`` constants stay available for
+``rate_limit._mark_wayback_state`` to satisfy when flipping state —
+those thresholds used to gate the active probe so a single blip
+didn't pause the worker. With passive observation, a 429 is never a
+blip, so the rate-limit module flips state immediately while still
+writing the thresholds into the persisted counters so anyone reading
+the raw DB row still sees a consistent picture.
 """
 from __future__ import annotations
-import asyncio
 import dataclasses
 import json
-import math
-import random
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
 
-from . import events_bus, log as _log
+from . import log as _log
 
 logger = _log.get("wayback.probe")
 
 
-PROBE_URL = (
-    "https://web.archive.org/cdx/search/cdx"
-    "?url=example.com&limit=1&output=json"
-)
-PROBE_TIMEOUT = 45      # default seconds per probe request; overridable via settings.
-# IA's CDX occasionally serves trivial 1-row lookups in ~30s during slow
-# periods. 45s leaves headroom above that. The worst case for a failing
-# probe (timeout) adds ~45s to the cycle time; with PROBE_INTERVAL=60s
-# that means the cadence stretches to ~105s instead of 60s during
-# outages — still responsive enough to catch recovery within a couple
-# of minutes.
-PROBE_TIMEOUT_MIN = 1
-PROBE_TIMEOUT_MAX = 120
-PROBE_INTERVAL = 60.0
-PROBE_JITTER = 10.0
-FAIL_THRESHOLD = 3      # consecutive probe failures before flipping to "down"
-OK_THRESHOLD = 2        # consecutive successes before flipping back to "up"
+FAIL_THRESHOLD = 3
+OK_THRESHOLD = 2
 
 
 @dataclasses.dataclass
@@ -55,7 +54,8 @@ class ProbeState:
 
     def observe(self, ok: bool) -> Optional[str]:
         """Feed one probe result. Returns the new state name if it just
-        flipped, else None."""
+        flipped, else None. Retained for callers (tests, legacy paths)
+        that still track ok/fail streaks."""
         if ok:
             self.consecutive_ok += 1
             self.consecutive_fails = 0
@@ -69,79 +69,6 @@ class ProbeState:
                 self.state = "down"
                 return "down"
         return None
-
-
-def get_probe_timeout() -> int:
-    """Per-probe timeout in whole seconds. Reads the persisted setting
-    (settable via the dashboard) and falls back to ``PROBE_TIMEOUT``
-    when unset, garbage, or non-finite (NaN / ±inf can sneak past
-    ``float()`` and then crash ``round()``). Clamped to
-    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Integer so the UI input
-    round-trips cleanly."""
-    from . import jobs
-    raw = jobs.get_setting("wayback_probe_timeout", "")
-    if not raw:
-        return PROBE_TIMEOUT
-    try:
-        v = float(raw)
-    except (TypeError, ValueError):
-        return PROBE_TIMEOUT
-    if not math.isfinite(v):
-        return PROBE_TIMEOUT
-    return int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
-
-
-def set_probe_timeout(seconds) -> int:
-    """Persist ``seconds`` after clamping. Accepts any stringish/numeric
-    input (route handler forwards the raw form value); falls back to
-    ``PROBE_TIMEOUT`` on garbage, then clamps to
-    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]`` and quantizes to whole
-    seconds so the UI's integer input round-trips cleanly against the
-    persisted value. Returns the value actually written."""
-    from . import jobs
-    try:
-        v = float(seconds) if seconds is not None and seconds != "" else PROBE_TIMEOUT
-    except (TypeError, ValueError):
-        v = PROBE_TIMEOUT
-    if not math.isfinite(v):
-        v = PROBE_TIMEOUT
-    bounded = int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
-    jobs.set_setting("wayback_probe_timeout", str(bounded))
-    return bounded
-
-
-def probe_once(url: str = PROBE_URL, timeout: "float | None" = None) -> bool:
-    """One probe request. True iff CDX answered HTTP 200 within timeout.
-    If the response object is missing both ``.status`` and ``.getcode()``
-    we treat the probe as failed — this is a health check, so the safe
-    default is "not up" rather than the previous fail-open behavior.
-    ``timeout=None`` reads the persisted setting (falls back to
-    ``PROBE_TIMEOUT``)."""
-    if timeout is None:
-        timeout = get_probe_timeout()
-    req = urllib.request.Request(url, headers={"User-Agent": "Wayback-Archive-Dashboard/probe"})
-    import time as _time
-    start = _time.monotonic()
-    logger.debug("probe HTTP GET url=%s timeout=%ss (heartbeat)", url, timeout)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            status = getattr(r, "status", None)
-            if status is None:
-                try:
-                    status = r.getcode()
-                except Exception:
-                    status = None
-            dur_ms = (_time.monotonic() - start) * 1000
-            ok = (status == 200)
-            logger.debug(
-                "probe HTTP response status=%s ok=%s duration=%.1fms",
-                status, ok, dur_ms,
-            )
-            return ok
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        dur_ms = (_time.monotonic() - start) * 1000
-        logger.debug("probe fail: %s (duration=%.1fms)", e, dur_ms)
-        return False
 
 
 _BACKOFF_MINUTES: tuple[int, ...] = (
@@ -166,7 +93,7 @@ def _now_iso() -> str:
 
 def load_state() -> ProbeState:
     """Read persisted state from the ``settings`` table."""
-    from . import jobs  # deferred import to avoid circular
+    from . import jobs
     with jobs.connect() as c:
         row = c.execute(
             "SELECT key,value FROM settings WHERE key IN ('wayback_probe_state')"
@@ -221,42 +148,6 @@ def is_wayback_up() -> bool:
     return load_state().state != "down"
 
 
-def run_probe_and_update() -> dict:
-    """User-initiated probe ("Try now"). This is a check-only path — a
-    failing manual probe must NOT push the state toward 'down' or shorten
-    any deferred-job not_before, and it must NOT count against the
-    scheduled backoff. A succeeding manual probe IS allowed to flip
-    state up (because that's strictly good news) and release deferred
-    jobs immediately.
-
-    Returns a ``get_status()`` snapshot plus ``probe_ok`` for this
-    specific attempt so the banner can render a transient hint."""
-    ok = probe_once()
-    flipped = None
-    if ok:
-        state = load_state()
-        flipped = state.observe(True)
-        if flipped == "up":
-            logger.warning("wayback state flip -> up (manual retry)")
-            save_state(state, since_iso=_now_iso())
-            from . import jobs
-            released = jobs.release_deferred()
-            if released:
-                logger.info("released %d deferred jobs (manual retry)", released)
-        else:
-            # Saw a success but haven't hit the 2-in-a-row threshold yet.
-            # Persist the bumped ok counter, but don't touch state_since.
-            save_state(state)
-    # Always publish so the banner refreshes its countdown / shows the
-    # user's click was received. A failing manual probe falls through
-    # here without mutating any counters.
-    events_bus.publish("wayback-state-changed")
-    snap = get_status()
-    snap["probe_ok"] = ok
-    snap["flipped_to"] = flipped
-    return snap
-
-
 def get_status() -> dict:
     """Snapshot for the UI / logs. Reads both settings keys in a single
     SQLite connection so a concurrent ``save_state()`` commit can't
@@ -279,58 +170,3 @@ def get_status() -> dict:
         "consecutive_fails": int(data.get("consecutive_fails", 0)),
         "consecutive_ok": int(data.get("consecutive_ok", 0)),
     }
-
-
-async def probe_loop(stop: asyncio.Event) -> None:
-    initial = load_state()
-    logger.info("probe loop start state=%s fails=%d ok=%d",
-                initial.state, initial.consecutive_fails, initial.consecutive_ok)
-    logger.debug(
-        "probe loop config interval=%ss jitter=±%ss fail_threshold=%d "
-        "ok_threshold=%d probe_url=%s",
-        PROBE_INTERVAL, PROBE_JITTER, FAIL_THRESHOLD, OK_THRESHOLD, PROBE_URL,
-    )
-    tick = 0
-    while not stop.is_set():
-        tick += 1
-        # Reload each iteration so a concurrent manual retry (which
-        # writes to the same settings keys) can't be clobbered by a
-        # stale in-memory counter. Cheap single-row SELECT.
-        state = load_state()
-        logger.debug(
-            "probe tick=%d heartbeat start state=%s fails=%d ok=%d",
-            tick, state.state, state.consecutive_fails, state.consecutive_ok,
-        )
-        ok = await asyncio.to_thread(probe_once)
-        flipped = state.observe(ok)
-        logger.debug(
-            "probe tick=%d result ok=%s state=%s fails=%d ok_streak=%d "
-            "flipped=%s",
-            tick, ok, state.state, state.consecutive_fails,
-            state.consecutive_ok, flipped,
-        )
-        if flipped:
-            logger.warning("wayback state flip -> %s (fails=%d ok=%d)",
-                           flipped, state.consecutive_fails, state.consecutive_ok)
-            save_state(state, since_iso=_now_iso())
-            events_bus.publish("wayback-state-changed")
-            if flipped == "up":
-                from . import jobs
-                released = jobs.release_deferred()
-                if released:
-                    logger.info("released %d deferred jobs", released)
-                else:
-                    logger.debug("no deferred jobs to release on flip->up")
-        else:
-            # Persist counters even without a flip so the dashboard
-            # shows accurate fail/ok streaks.
-            save_state(state)
-            logger.debug("probe tick=%d persisted counters (no flip)", tick)
-        delay = PROBE_INTERVAL + random.uniform(-PROBE_JITTER, PROBE_JITTER)
-        logger.debug("probe tick=%d sleeping %.1fs until next heartbeat",
-                     tick, delay)
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=delay)
-        except asyncio.TimeoutError:
-            pass
-    logger.debug("probe loop exit after tick=%d (stop event set)", tick)

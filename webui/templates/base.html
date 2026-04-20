@@ -91,11 +91,15 @@
   .diff-table { width: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
   .diff-table td { padding: 0 .3rem; vertical-align: top; white-space: pre-wrap; }
   #wayback-banner-slot:empty { display: none; }
-  .wayback-banner { margin: .6rem 0 1rem; padding: .6rem .9rem; border-radius: .4rem; background: #fff4e5; border-left: 4px solid #d97706; color: #7c2d12; font-size: .9rem; line-height: 1.5; }
+  .wayback-banner { margin: .6rem 0 1rem; padding: .8rem 1rem; border-radius: .4rem; background: #fff4e5; border-left: 4px solid #d97706; color: #7c2d12; font-size: .9rem; line-height: 1.5; }
   .wayback-banner .banner-counts { display: inline-block; margin-left: .6rem; font-size: .78rem; color: #9a3412; opacity: .8; }
-  .wayback-banner .banner-retry { margin-left: .6rem; padding: .15rem .7rem; font-size: .8rem; border-radius: .3rem; border: 1px solid #d97706; background: #fff; color: #7c2d12; cursor: pointer; }
-  .wayback-banner .banner-retry:hover { background: #ffedd5; }
-  .wayback-banner .banner-retry.htmx-request { opacity: .5; cursor: progress; }
+  .wayback-banner .banner-countdown { margin-top: .4rem; font-size: 1.05rem; }
+  .wayback-banner .banner-countdown strong { font-family: ui-monospace, monospace; font-size: 1.15rem; padding: 0 .15rem; }
+  .wayback-banner .banner-stern { margin-top: .6rem; padding: .55rem .75rem; background: rgba(185, 28, 28, .08); border-left: 3px solid #b91c1c; border-radius: .2rem; font-size: .88rem; }
+  .wayback-banner .banner-reassure { margin-top: .5rem; font-size: .82rem; color: #78350f; opacity: .9; }
+  .wayback-banner--severe { background: #fee2e2; border-left-color: #991b1b; color: #7f1d1d; }
+  .wayback-banner--severe .banner-stern { background: rgba(153, 27, 27, .18); border-left-color: #991b1b; color: #7f1d1d; font-weight: 500; }
+  .wayback-banner--severe .banner-countdown strong { color: #991b1b; }
 </style>
 </head>
 <body hx-sse:connect="/events">
@@ -110,7 +114,7 @@
 </nav>
 <div id="wayback-banner-slot"
      hx-get="/api/wayback-status"
-     hx-trigger="load, every 30s, sse:wayback-state-changed"
+     hx-trigger="load, every 30s, sse:wayback-state-changed, wayback-countdown-done"
      hx-swap="innerHTML"></div>
 <main>{% block content %}{% endblock %}</main>
 <footer style="margin:2rem 0 1rem;padding-top:.8rem;border-top:1px solid var(--pico-muted-border-color);display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;font-size:.78rem;color:var(--pico-muted-color)">
@@ -153,6 +157,47 @@
   });
   htmx.onLoad(root => (root.querySelectorAll ? root : document)
     .querySelectorAll('.multi-combo').forEach(setup));
+})();
+
+// Countdown widget: any element with [data-countdown-iso="..."] gets
+// its text content updated every second to the remaining time. When
+// the target is reached, ticks a final "now" and asks the wayback
+// banner to refresh so a still-active block (or a freshly-recovered
+// state) renders correctly.
+(function setupCountdowns() {
+  function fmt(secs) {
+    if (secs <= 0) return "now";
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m ${s.toString().padStart(2,'0')}s`;
+    if (m > 0) return `${m}m ${s.toString().padStart(2,'0')}s`;
+    return `${s}s`;
+  }
+  let firedRefresh = false;
+  setInterval(() => {
+    const nodes = document.querySelectorAll('[data-countdown-iso]');
+    let anyLive = false;
+    nodes.forEach(el => {
+      const iso = el.dataset.countdownIso;
+      if (!iso) return;
+      const target = Date.parse(iso);
+      if (isNaN(target)) return;
+      const remaining = Math.round((target - Date.now()) / 1000);
+      el.textContent = fmt(remaining);
+      if (remaining > 0) anyLive = true;
+    });
+    // Once every countdown has hit zero, ask the banner to re-fetch.
+    // Guard with firedRefresh so we don't slam the server every
+    // second while the backend is still catching up.
+    if (!anyLive && nodes.length && !firedRefresh) {
+      firedRefresh = true;
+      const slot = document.getElementById('wayback-banner-slot');
+      if (slot && window.htmx) htmx.trigger(slot, 'wayback-countdown-done');
+      setTimeout(() => { firedRefresh = false; }, 5000);
+    }
+    if (nodes.length === 0) firedRefresh = false;
+  }, 1000);
 })();
 
 // Error toast: htmx 4 unifies request/swap/timeout errors under htmx:error.
