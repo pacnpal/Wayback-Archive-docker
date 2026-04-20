@@ -63,11 +63,20 @@ class ProbeState:
 
 
 def probe_once(url: str = PROBE_URL, timeout: float = PROBE_TIMEOUT) -> bool:
-    """One probe request. True iff CDX answered HTTP 200 within timeout."""
+    """One probe request. True iff CDX answered HTTP 200 within timeout.
+    If the response object is missing both ``.status`` and ``.getcode()``
+    we treat the probe as failed — this is a health check, so the safe
+    default is "not up" rather than the previous fail-open behavior."""
     req = urllib.request.Request(url, headers={"User-Agent": "Wayback-Archive-Dashboard/probe"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return getattr(r, "status", 200) == 200
+            status = getattr(r, "status", None)
+            if status is None:
+                try:
+                    status = r.getcode()
+                except Exception:
+                    status = None
+            return status == 200
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         logger.debug("probe fail: %s", e)
         return False

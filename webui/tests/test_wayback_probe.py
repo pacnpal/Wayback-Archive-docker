@@ -80,6 +80,21 @@ def test_probe_once_returns_false_on_timeout(monkeypatch):
     assert wayback_probe.probe_once() is False
 
 
+def test_probe_once_fails_closed_when_status_is_missing(monkeypatch):
+    """A health check must never default to 'up' on a malformed response
+    object. Regression for the previous `getattr(r, 'status', 200)` that
+    would report success when the attribute was absent."""
+    class _R:
+        # no .status attribute, getcode() raises
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, *a): return b""
+        def getcode(self):
+            raise AttributeError("no code here")
+    monkeypatch.setattr(wayback_probe.urllib.request, "urlopen", lambda *a, **kw: _R())
+    assert wayback_probe.probe_once() is False
+
+
 def test_probe_once_returns_false_on_non_200(monkeypatch):
     class _R:
         status = 503
