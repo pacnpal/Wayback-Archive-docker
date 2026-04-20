@@ -76,7 +76,6 @@
     <th></th>
   </tr></thead>
   <tbody id="jobs-tbody"
-         hx-sse:connect="/events"
          hx-get="{{ refresh_url }}"
          hx-trigger="sse:jobs-changed, jobs-changed from:body, every 30s"
          hx-select="#jobs-tbody"

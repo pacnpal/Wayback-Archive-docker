@@ -6,7 +6,7 @@ from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback
+from .. import jobs, wayback, wayback_probe
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -331,6 +331,79 @@ async def job_log(job_id: int):
 async def cancel(job_id: int):
     jobs.cancel_job(job_id)
     return RedirectResponse("/", status_code=303)
+
+
+@router.post("/api/wayback-probe/retry", response_class=HTMLResponse)
+async def api_wayback_retry(request: Request):
+    """Run one probe on demand (user clicked 'Try now'). Only meaningful
+    while state=='down' — the button is gated by that, but guard the
+    endpoint too so a stale page or a direct curl can't burn a probe or
+    spin up network traffic we don't need."""
+    import asyncio
+    if wayback_probe.load_state().state != "down":
+        # Graceful no-op: render the current (empty) banner partial so
+        # any stale client DOM gets cleared out in the same swap.
+        return await api_wayback_status(request)
+    await asyncio.to_thread(wayback_probe.run_probe_and_update)
+    # Delegate rendering to the GET handler so both paths stay in sync.
+    return await api_wayback_status(request)
+
+
+@router.get("/api/wayback-status", response_class=HTMLResponse)
+async def api_wayback_status(request: Request):
+    """Partial: wayback probe banner. Empty when state != 'down'."""
+    from datetime import datetime, timezone
+    status = wayback_probe.get_status()
+    if status["state"] != "down":
+        # Empty response keeps the slot in the DOM but invisible.
+        return HTMLResponse("")
+    def _parse_utc(s: "str | None") -> "datetime | None":
+        """Parse an ISO timestamp and force tz-awareness. ``fromisoformat``
+        returns a naive datetime when the stored string lacks an offset,
+        which would then raise ``TypeError`` on subtraction against the
+        tz-aware ``now`` below and 500 the banner endpoint."""
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s)
+        except (TypeError, ValueError):
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    since_dt = _parse_utc(status.get("since"))
+    next_retry = jobs.earliest_deferred_not_before()
+    next_retry_dt = _parse_utc(next_retry)
+    now = datetime.now(timezone.utc)
+
+    def _human_delta(target: "datetime | None") -> str:
+        if not target:
+            return ""
+        diff = target - now
+        secs = int(diff.total_seconds())
+        if secs <= 0:
+            return "any moment now"
+        h, rem = divmod(secs, 3600)
+        m, _ = divmod(rem, 60)
+        if h:
+            return f"{h}h {m}m"
+        return f"{m}m"
+
+    down_for = ""
+    if since_dt:
+        elapsed = int((now - since_dt).total_seconds())
+        h, rem = divmod(max(0, elapsed), 3600)
+        m, _ = divmod(rem, 60)
+        down_for = f"{h}h {m}m" if h else f"{m}m"
+
+    return templates.TemplateResponse(request, "_wayback_banner.html", {
+        "request": request,
+        "status": status,
+        "down_for": down_for,
+        "next_retry_human": _human_delta(next_retry_dt),
+        "next_retry_iso": next_retry,
+    })
 
 
 @router.get("/api/snapshots", response_class=HTMLResponse)

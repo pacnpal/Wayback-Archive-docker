@@ -90,9 +90,15 @@
   .diff-add { background: #d4edda; } .diff-del { background: #f8d7da; }
   .diff-table { width: 100%; font-family: ui-monospace, monospace; font-size: 0.8rem; }
   .diff-table td { padding: 0 .3rem; vertical-align: top; white-space: pre-wrap; }
+  #wayback-banner-slot:empty { display: none; }
+  .wayback-banner { margin: .6rem 0 1rem; padding: .6rem .9rem; border-radius: .4rem; background: #fff4e5; border-left: 4px solid #d97706; color: #7c2d12; font-size: .9rem; line-height: 1.5; }
+  .wayback-banner .banner-counts { display: inline-block; margin-left: .6rem; font-size: .78rem; color: #9a3412; opacity: .8; }
+  .wayback-banner .banner-retry { margin-left: .6rem; padding: .15rem .7rem; font-size: .8rem; border-radius: .3rem; border: 1px solid #d97706; background: #fff; color: #7c2d12; cursor: pointer; }
+  .wayback-banner .banner-retry:hover { background: #ffedd5; }
+  .wayback-banner .banner-retry.htmx-request { opacity: .5; cursor: progress; }
 </style>
 </head>
-<body>
+<body hx-sse:connect="/events">
 <nav>
   <ul>
     <li><strong>🗄 Wayback Archive</strong></li>
@@ -102,6 +108,10 @@
     <li><a href="/schedules" preload>Schedules</a></li>
   </ul>
 </nav>
+<div id="wayback-banner-slot"
+     hx-get="/api/wayback-status"
+     hx-trigger="load, every 30s, sse:wayback-state-changed"
+     hx-swap="innerHTML"></div>
 <main>{% block content %}{% endblock %}</main>
 <footer style="margin:2rem 0 1rem;padding-top:.8rem;border-top:1px solid var(--pico-muted-border-color);display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;font-size:.78rem;color:var(--pico-muted-color)">
   <a href="{{ request.app.state.github_url }}" target="_blank" rel="noopener"

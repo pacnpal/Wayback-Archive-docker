@@ -1,0 +1,22 @@
+{# Shown only when wayback_probe state == "down". Parent <div> is
+   always present in base.html so SSE-driven htmx swaps target a stable
+   node; content goes empty when Wayback is up. #}
+<div class="wayback-banner" role="alert">
+  <strong>Internet Archive unreachable.</strong>
+  The dashboard has paused new jobs
+  {% if down_for %}(down for {{ down_for }}){% endif %}
+  and is probing CDX every 60s.
+  {% if next_retry_human %}
+    Next deferred-job retry in <strong>{{ next_retry_human }}</strong>
+    <span class="banner-next-iso" title="{{ next_retry_iso }}"></span>.
+  {% endif %}
+  <button type="button"
+          class="banner-retry"
+          hx-post="/api/wayback-probe/retry"
+          hx-target="#wayback-banner-slot"
+          hx-swap="innerHTML"
+          hx-indicator="this">Try now</button>
+  <span class="banner-counts">
+    consecutive fails: {{ status.consecutive_fails }}
+  </span>
+</div>

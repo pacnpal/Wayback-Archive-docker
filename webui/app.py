@@ -16,7 +16,7 @@ GITHUB_URL = "https://github.com/pacnpal/Wayback-Archive-Dashboard"
 
 import asyncio as _asyncio
 import json as _json
-from . import jobs, scheduler, log as log_mod, job_progress, events_bus
+from . import jobs, scheduler, log as log_mod, job_progress, events_bus, wayback_probe
 from .routes import dashboard, browser, schedules as schedules_routes, diff, sites as sites_routes, events as events_routes
 
 BASE = Path(__file__).parent
@@ -30,11 +30,12 @@ async def lifespan(app: FastAPI):
     t1 = asyncio.create_task(jobs.worker_loop(stop))
     t2 = asyncio.create_task(scheduler.scheduler_loop(stop))
     t3 = asyncio.create_task(_progress_logger(stop))
+    t4 = asyncio.create_task(wayback_probe.probe_loop(stop))
     try:
         yield
     finally:
         stop.set()
-        await asyncio.gather(t1, t2, t3, return_exceptions=True)
+        await asyncio.gather(t1, t2, t3, t4, return_exceptions=True)
 
 
 async def _progress_logger(stop: _asyncio.Event) -> None:
