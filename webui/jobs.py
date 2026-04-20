@@ -330,15 +330,19 @@ def cancel_many(ids: list[int]) -> int:
 
 def pick_ready_pending(limit: int) -> list[sqlite3.Row]:
     """Pending jobs whose ``not_before`` has elapsed (or is NULL).
-    Encapsulates the worker's SELECT so the outage gate and tests share
-    the same filter."""
+    Repair jobs (``repair_paths_json`` non-null) sort before full-archive
+    jobs: repairs hand the shim an explicit path list so they finish in
+    seconds-to-minutes, while a full archive can run for hours — letting
+    repairs skip the line keeps the worker slots useful and shrinks the
+    missing-asset queue surfaced by the dashboard."""
     now = now_iso()
     with connect() as c:
         return c.execute(
             "SELECT * FROM jobs "
             "WHERE status='pending' "
             "AND (not_before IS NULL OR not_before <= ?) "
-            "ORDER BY id ASC LIMIT ?",
+            "ORDER BY CASE WHEN repair_paths_json IS NOT NULL THEN 0 ELSE 1 END, "
+            "id ASC LIMIT ?",
             (now, limit),
         ).fetchall()
 

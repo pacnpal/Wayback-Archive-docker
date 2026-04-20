@@ -45,6 +45,31 @@ def test_migration_adds_not_before_and_attempts(jobs_db):
     assert "attempts" in cols
 
 
+def test_pick_ready_pending_prioritizes_repair_over_archive(jobs_db):
+    archive1 = _insert_pending(jobs_db)
+    repair1 = _insert_pending(jobs_db, repair_paths_json='["a.html"]')
+    archive2 = _insert_pending(jobs_db)
+    repair2 = _insert_pending(jobs_db, repair_paths_json='["b.html"]')
+    ready = jobs_db.pick_ready_pending(limit=10)
+    ids = [r["id"] for r in ready]
+    # Repairs drain first (in id order); archives follow (in id order).
+    assert ids == [repair1, repair2, archive1, archive2]
+
+
+def test_pick_ready_pending_repair_priority_still_respects_not_before(jobs_db):
+    """A deferred repair job (future not_before) must NOT jump the queue —
+    the not_before filter applies before the repair-priority ordering."""
+    from datetime import datetime, timedelta, timezone
+    future = (datetime.now(timezone.utc) + timedelta(hours=6)).replace(microsecond=0).isoformat()
+    deferred_repair = _insert_pending(jobs_db, repair_paths_json='["a.html"]',
+                                      not_before=future)
+    archive = _insert_pending(jobs_db)
+    ready = jobs_db.pick_ready_pending(limit=10)
+    ids = [r["id"] for r in ready]
+    assert deferred_repair not in ids
+    assert ids == [archive]
+
+
 def test_pick_pending_skips_future_not_before(jobs_db):
     future = (datetime.now(timezone.utc) + timedelta(hours=6)).replace(microsecond=0).isoformat()
     past = (datetime.now(timezone.utc) - timedelta(minutes=1)).replace(microsecond=0).isoformat()
