@@ -129,27 +129,30 @@
       Jobs-in-parallel setting lives at the top of the page.
     </small>
     <script>
-    async function saveConcurrency(btn, inputId, msgId) {
+    // Shared POST helper for the toolbar setting inputs. Routes return
+    // a 303 redirect on success which, combined with redirect:'manual',
+    // surfaces as response.type === 'opaqueredirect' with status=0 —
+    // so we can't rely on response.ok alone. Treat any 3xx as success,
+    // everything else (4xx/5xx, network fail) as error.
+    async function saveSetting(btn, inputId, msgId, url, fieldName) {
       const v = document.getElementById(inputId).value;
       const msg = document.getElementById(msgId);
       btn.disabled = true; msg.textContent = 'saving…';
       try {
-        const fd = new FormData(); fd.append('max_concurrent', v);
-        await fetch('/settings/max-concurrent', {method:'POST', body: fd, redirect: 'manual'});
+        const fd = new FormData(); fd.append(fieldName, v);
+        const res = await fetch(url, {method:'POST', body: fd, redirect: 'manual'});
+        const redirected = res.type === 'opaqueredirect' ||
+                           (res.status >= 300 && res.status < 400);
+        if (!(res.ok || redirected)) throw new Error('HTTP ' + res.status);
         msg.textContent = '✓ saved';
       } catch(e) { msg.textContent = 'error: ' + e; }
       finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
     }
+    async function saveConcurrency(btn, inputId, msgId) {
+      return saveSetting(btn, inputId, msgId, '/settings/max-concurrent', 'max_concurrent');
+    }
     async function saveProbeTimeout(btn, inputId, msgId) {
-      const v = document.getElementById(inputId).value;
-      const msg = document.getElementById(msgId);
-      btn.disabled = true; msg.textContent = 'saving…';
-      try {
-        const fd = new FormData(); fd.append('timeout', v);
-        await fetch('/settings/wayback-probe-timeout', {method:'POST', body: fd, redirect: 'manual'});
-        msg.textContent = '✓ saved';
-      } catch(e) { msg.textContent = 'error: ' + e; }
-      finally { btn.disabled = false; setTimeout(()=>msg.textContent='', 2000); }
+      return saveSetting(btn, inputId, msgId, '/settings/wayback-probe-timeout', 'timeout');
     }
     </script>
     <small>Uses the default option flags. Edit individual jobs afterward if needed.</small><br>
