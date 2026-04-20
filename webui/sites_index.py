@@ -13,6 +13,13 @@ from .safe_path import safe_output_child
 
 INDEX_NAME = ".index.json"
 
+# Stamped on every cache entry. Bump when _measure semantics change so the
+# lazy refresh in get_index() recomputes pre-existing rows. Missing/older
+# `v` values also trigger a recompute, which retires entries written by
+# pre-staleness-check builds (those numbers froze at the snapshot's first
+# measurement and never tracked subsequent file additions).
+SNAPSHOT_VERSION = 2
+
 _TS_RE = re.compile(r"^\d{14}$")
 
 
@@ -60,12 +67,17 @@ def _atomic_write(host: str, data: dict) -> None:
 
 
 def _measure(snapshot_dir: Path) -> dict:
+    """Walk a snapshot dir; return {size_bytes, file_count, mtime, v}.
+    A subdir vanishing mid-walk is tolerated — we keep the partial counts
+    instead of throwing them away and returning {}."""
     size = 0
     files = 0
-    try:
-        stack = [snapshot_dir]
-        while stack:
-            cur = stack.pop()
+    if not snapshot_dir.is_dir():
+        return {}
+    stack: list[Path] = [snapshot_dir]
+    while stack:
+        cur = stack.pop()
+        try:
             with os.scandir(cur) as it:
                 for entry in it:
                     if entry.is_dir(follow_symlinks=False):
@@ -76,14 +88,15 @@ def _measure(snapshot_dir: Path) -> dict:
                             size += entry.stat(follow_symlinks=False).st_size
                         except OSError:
                             pass
-    except FileNotFoundError:
-        return {}
+        except FileNotFoundError:
+            continue
     try:
         mtime = snapshot_dir.stat().st_mtime
         mtime_iso = datetime.fromtimestamp(mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
     except OSError:
         mtime_iso = None
-    return {"size_bytes": size, "file_count": files, "mtime": mtime_iso}
+    return {"size_bytes": size, "file_count": files, "mtime": mtime_iso,
+            "v": SNAPSHOT_VERSION}
 
 
 def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
@@ -116,7 +129,8 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
 
 
 def get_index(host: str) -> dict:
-    """Return cached index, lazily refreshing entries whose dir mtime changed."""
+    """Return cached index, lazily refreshing entries whose dir mtime moved
+    or whose cache predates SNAPSHOT_VERSION."""
     try:
         host_dir = safe_output_child(host)
     except ValueError:
@@ -125,21 +139,29 @@ def get_index(host: str) -> dict:
         return {}
     idx = _load(host)
     on_disk = {p.name for p in host_dir.iterdir() if p.is_dir() and is_snapshot_ts(p.name)}
-    stale: list[str] = []
+    dirty = False
     # Drop index entries whose dir was removed.
     for ts in list(idx.keys()):
         if ts not in on_disk:
             del idx[ts]
-            stale.append(ts)
-    # Find snapshots missing from the cache entirely.
-    missing = [ts for ts in on_disk if ts not in idx]
-    if missing:
-        for ts in missing:
-            m = _measure(host_dir / ts)
-            if m:
-                idx[ts] = m
-        stale.extend(missing)
-    if stale:
+            dirty = True
+    for ts in on_disk:
+        sd = host_dir / ts
+        cached = idx.get(ts)
+        if cached and cached.get("v") == SNAPSHOT_VERSION:
+            try:
+                cur_mtime = datetime.fromtimestamp(
+                    sd.stat().st_mtime, tz=timezone.utc
+                ).replace(microsecond=0).isoformat()
+            except OSError:
+                cur_mtime = None
+            if cur_mtime == cached.get("mtime"):
+                continue
+        m = _measure(sd)
+        if m and idx.get(ts) != m:
+            idx[ts] = m
+            dirty = True
+    if dirty:
         _atomic_write(host, idx)
     return idx
 
