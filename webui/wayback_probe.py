@@ -31,12 +31,15 @@ PROBE_URL = (
     "https://web.archive.org/cdx/search/cdx"
     "?url=example.com&limit=1&output=json"
 )
-PROBE_TIMEOUT = 45.0    # default seconds per probe request; overridable via settings.
+PROBE_TIMEOUT = 45      # default seconds per probe request; overridable via settings.
 # IA's CDX occasionally serves trivial 1-row lookups in ~30s during slow
-# periods. 45s leaves headroom above that and still sits below the 60s
-# probe interval, so back-to-back probes don't overlap.
-PROBE_TIMEOUT_MIN = 1.0
-PROBE_TIMEOUT_MAX = 120.0
+# periods. 45s leaves headroom above that. The worst case for a failing
+# probe (timeout) adds ~45s to the cycle time; with PROBE_INTERVAL=60s
+# that means the cadence stretches to ~105s instead of 60s during
+# outages — still responsive enough to catch recovery within a couple
+# of minutes.
+PROBE_TIMEOUT_MIN = 1
+PROBE_TIMEOUT_MAX = 120
 PROBE_INTERVAL = 60.0
 PROBE_JITTER = 10.0
 FAIL_THRESHOLD = 3      # consecutive probe failures before flipping to "down"
@@ -67,10 +70,12 @@ class ProbeState:
         return None
 
 
-def get_probe_timeout() -> float:
-    """Per-probe timeout in seconds. Reads the persisted setting (settable
-    via the dashboard) and falls back to ``PROBE_TIMEOUT`` when unset or
-    garbage. Clamped to ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``."""
+def get_probe_timeout() -> int:
+    """Per-probe timeout in whole seconds. Reads the persisted setting
+    (settable via the dashboard) and falls back to ``PROBE_TIMEOUT``
+    when unset or garbage. Clamped to
+    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Integer so the UI input
+    round-trips cleanly."""
     from . import jobs
     with jobs.connect() as c:
         row = c.execute(
@@ -82,21 +87,22 @@ def get_probe_timeout() -> float:
         v = float(row["value"])
     except (TypeError, ValueError):
         return PROBE_TIMEOUT
-    return max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
+    return int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
 
 
-def set_probe_timeout(seconds) -> float:
+def set_probe_timeout(seconds) -> int:
     """Persist ``seconds`` after clamping. Accepts any stringish/numeric
     input (route handler forwards the raw form value); falls back to
     ``PROBE_TIMEOUT`` on garbage, then clamps to
-    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Returns the value
-    actually written."""
+    ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]`` and quantizes to whole
+    seconds so the UI's integer input round-trips cleanly against the
+    persisted value. Returns the value actually written."""
     from . import jobs
     try:
         v = float(seconds) if seconds is not None and seconds != "" else PROBE_TIMEOUT
     except (TypeError, ValueError):
         v = PROBE_TIMEOUT
-    bounded = max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))
+    bounded = int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
     jobs.set_setting("wayback_probe_timeout", str(bounded))
     return bounded
 

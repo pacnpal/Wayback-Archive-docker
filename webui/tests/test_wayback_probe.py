@@ -245,8 +245,25 @@ def test_probe_timeout_roundtrip(tmp_path, monkeypatch):
     j.init_db()
     import webui.wayback_probe as wp
     importlib.reload(wp)
-    assert wp.set_probe_timeout(45) == 45.0
-    assert wp.get_probe_timeout() == 45.0
+    # Integer in, integer out — so the UI's step="1" input round-trips
+    # cleanly without banker's-rounding drift.
+    assert wp.set_probe_timeout(45) == 45
+    assert wp.get_probe_timeout() == 45
+    assert isinstance(wp.get_probe_timeout(), int)
+
+
+def test_probe_timeout_quantizes_floats_to_whole_seconds(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+    # Fractional input rounds to int so the persisted value matches the
+    # integer the UI can actually display.
+    assert wp.set_probe_timeout(42.7) == 43
+    assert wp.get_probe_timeout() == 43
 
 
 def test_probe_timeout_clamps_to_bounds(tmp_path, monkeypatch):
@@ -284,7 +301,7 @@ def test_probe_once_uses_persisted_timeout(tmp_path, monkeypatch):
         raise urllib.error.URLError("stop here")
     monkeypatch.setattr(wp.urllib.request, "urlopen", fake_urlopen)
     wp.probe_once()
-    assert captured["timeout"] == 42.0
+    assert captured["timeout"] == 42
 
 
 def test_backoff_schedule():

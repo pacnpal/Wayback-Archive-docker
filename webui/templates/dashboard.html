@@ -19,7 +19,7 @@
   <legend>Global: Wayback probe timeout</legend>
   <label class="opt" style="display:flex;gap:.5rem;align-items:center;margin:0">
     <input type="number" id="top-probe-timeout" min="1" max="120" step="1"
-           value="{{ '%d'|format(wayback_probe_timeout|round|int) }}" style="width:5rem">
+           value="{{ wayback_probe_timeout }}" style="width:5rem">
     <span style="color:var(--pico-muted-color)">s</span>
     <button type="button" class="secondary" style="padding:.2rem .6rem"
             onclick="saveProbeTimeout(this,'top-probe-timeout','top-probe-timeout-msg')">Save</button>
