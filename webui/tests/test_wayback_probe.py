@@ -266,6 +266,30 @@ def test_probe_timeout_quantizes_floats_to_whole_seconds(tmp_path, monkeypatch):
     assert wp.get_probe_timeout() == 43
 
 
+def test_probe_timeout_rejects_non_finite_floats(tmp_path, monkeypatch):
+    """Regression: float('nan') and float('inf') parse successfully, then
+    round() raises (ValueError on nan, OverflowError on inf). Both input
+    paths (set_probe_timeout and the post-load round in get_probe_timeout)
+    must fall back to the default instead of crashing."""
+    monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
+    import importlib
+    import webui.jobs as j
+    importlib.reload(j)
+    j.init_db()
+    import webui.wayback_probe as wp
+    importlib.reload(wp)
+
+    for bad in ("nan", "inf", "-inf", "NaN", "Infinity"):
+        assert wp.set_probe_timeout(bad) == wp.PROBE_TIMEOUT, bad
+
+    # And if a non-finite value somehow lands in the DB directly, the
+    # reader must not crash either.
+    j.set_setting("wayback_probe_timeout", "nan")
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+    j.set_setting("wayback_probe_timeout", "inf")
+    assert wp.get_probe_timeout() == wp.PROBE_TIMEOUT
+
+
 def test_probe_timeout_clamps_to_bounds(tmp_path, monkeypatch):
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path))
     import importlib

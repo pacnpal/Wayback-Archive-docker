@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import math
 import random
 import urllib.error
 import urllib.request
@@ -73,7 +74,8 @@ class ProbeState:
 def get_probe_timeout() -> int:
     """Per-probe timeout in whole seconds. Reads the persisted setting
     (settable via the dashboard) and falls back to ``PROBE_TIMEOUT``
-    when unset or garbage. Clamped to
+    when unset, garbage, or non-finite (NaN / ±inf can sneak past
+    ``float()`` and then crash ``round()``). Clamped to
     ``[PROBE_TIMEOUT_MIN, PROBE_TIMEOUT_MAX]``. Integer so the UI input
     round-trips cleanly."""
     from . import jobs
@@ -86,6 +88,8 @@ def get_probe_timeout() -> int:
     try:
         v = float(row["value"])
     except (TypeError, ValueError):
+        return PROBE_TIMEOUT
+    if not math.isfinite(v):
         return PROBE_TIMEOUT
     return int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
 
@@ -101,6 +105,8 @@ def set_probe_timeout(seconds) -> int:
     try:
         v = float(seconds) if seconds is not None and seconds != "" else PROBE_TIMEOUT
     except (TypeError, ValueError):
+        v = PROBE_TIMEOUT
+    if not math.isfinite(v):
         v = PROBE_TIMEOUT
     bounded = int(round(max(PROBE_TIMEOUT_MIN, min(PROBE_TIMEOUT_MAX, v))))
     jobs.set_setting("wayback_probe_timeout", str(bounded))
