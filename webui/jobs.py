@@ -158,6 +158,86 @@ def init_db() -> None:
                             f.write(f"\n[dashboard] container restarted at {now_iso()} — job re-queued to resume\n")
                     except Exception:
                         pass
+        _migrate_legacy_probe_state(c)
+
+
+def _migrate_legacy_probe_state(c: sqlite3.Connection) -> None:
+    """One-shot cleanup for v0.3.x → v0.4.x migration.
+
+    v0.3.x ran an active heartbeat probe that incremented
+    ``consecutive_fails`` on every tick during an outage; a 4-hour
+    IA blip left behind a settings row like
+    ``{"state":"down","consecutive_fails":240,...}``. v0.4.0 removed
+    the probe and flipped to passive state-tracking — but if that
+    legacy row is still in the DB on first v0.4.x boot,
+    ``is_wayback_up()`` returns False and the worker gates itself
+    shut. Without the old probe to ever flip the state back up, the
+    dashboard gets wedged "down" until someone manually deletes the
+    row. Users migrating across the version boundary shouldn't have
+    to know about the internal schema.
+
+    Signals that a row is v0.3.x legacy:
+
+    - ``consecutive_fails > FAIL_THRESHOLD`` or
+      ``consecutive_ok > OK_THRESHOLD`` — v0.4.x's passive state
+      flipper only writes counters at exactly the threshold values,
+      so anything above is a heartbeat leftover.
+    - ``state == "down"`` with no active ``cdx_block_until`` — in
+      v0.4.x, "down" is always paired with an active rate-limit
+      block. A "down" state with no block is either a legacy row or
+      a state/block pair that desync'd; either way, clear it so
+      fresh traffic can drive the real state.
+
+    Also drops the orphaned ``wayback_probe_timeout`` setting since
+    v0.4.x removed the probe-timeout UI. Safe to re-run: if no
+    legacy rows exist this is a no-op.
+    """
+    from . import wayback_probe
+    row = c.execute(
+        "SELECT value FROM settings WHERE key='wayback_probe_state'"
+    ).fetchone()
+    # The orphan timeout setting is obsolete regardless of probe
+    # state — v0.4.x has no code path that reads it. Drop it
+    # unconditionally so the settings table doesn't carry dead keys.
+    c.execute("DELETE FROM settings WHERE key='wayback_probe_timeout'")
+    if not row or not row["value"]:
+        return
+    try:
+        data = json.loads(row["value"])
+    except (TypeError, ValueError):
+        # Corrupt JSON — drop defensively so the reader doesn't keep
+        # reconstructing a default ProbeState() and masking the bad
+        # row's existence.
+        logger.info("clearing corrupt wayback_probe_state settings row")
+        c.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('wayback_probe_state','wayback_state_since')"
+        )
+        return
+    fails = int(data.get("consecutive_fails", 0) or 0)
+    oks = int(data.get("consecutive_ok", 0) or 0)
+    state = data.get("state", "unknown")
+    legacy_counters = (
+        fails > wayback_probe.FAIL_THRESHOLD
+        or oks > wayback_probe.OK_THRESHOLD
+    )
+    orphan_down = False
+    if state == "down":
+        bu_row = c.execute(
+            "SELECT value FROM settings WHERE key='cdx_block_until'"
+        ).fetchone()
+        if not bu_row or not bu_row["value"]:
+            orphan_down = True
+    if legacy_counters or orphan_down:
+        logger.info(
+            "migrating legacy wayback_probe_state: state=%s fails=%d ok=%d "
+            "legacy_counters=%s orphan_down=%s — clearing",
+            state, fails, oks, legacy_counters, orphan_down,
+        )
+        c.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('wayback_probe_state','wayback_state_since')"
+        )
 
 
 def _normalize_target(url: str) -> str:
