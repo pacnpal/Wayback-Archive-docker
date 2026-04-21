@@ -49,6 +49,53 @@ class WaybackUnreachable(RuntimeError):
     pass
 
 
+def probe_scheme(host_or_url: str) -> str:
+    """Return the scheme (``http`` or ``https``) that actually has
+    captures for ``host_or_url``. Used by the archive-enqueue routes
+    so we don't blindly prepend ``https://`` — pre-HTTPS-era sites
+    only have ``http://`` captures in CDX, and feeding an ``https://``
+    URL into CDX for those sites returns zero matches.
+
+    Accepts either a bare host (``compaq.com``) or an already-schemed
+    URL (``http://compaq.com/foo``). If already schemed, returns the
+    existing scheme unchanged — callers that explicitly typed one are
+    trusted. Only two lookups at worst, both cached; every
+    user-facing enqueue path hits the local ``_CACHE`` on repeat
+    bulks for the same host.
+
+    Strategy: try ``https://`` first (the modern default and the
+    overwhelming majority of archives), then ``http://`` if that came
+    up empty. Returning ``https`` when both fail is conservative —
+    downstream ``list_snapshots`` will raise ``WaybackUnreachable``
+    with a clear message and the caller can surface that to the user.
+    """
+    from urllib.parse import urlparse
+    p = urlparse(host_or_url if "://" in host_or_url else f"//{host_or_url}",
+                 scheme="")
+    if p.scheme in ("http", "https"):
+        return p.scheme
+    host = p.hostname or host_or_url
+    path = p.path or "/"
+    # Order matters: try https first so we don't pay the http probe
+    # for modern sites (the common case).
+    for scheme in ("https", "http"):
+        url = f"{scheme}://{host}{path}"
+        try:
+            snaps = list_snapshots(url, limit=1, collapse_digits=14)
+        except WaybackUnreachable:
+            # Rate-limited or IA down — don't guess, bubble up so the
+            # caller surfaces a real error instead of silently picking
+            # the wrong scheme.
+            raise
+        except Exception:
+            snaps = []
+        if snaps:
+            logger.debug("probe_scheme host=%s -> %s", host, scheme)
+            return scheme
+    logger.debug("probe_scheme host=%s -> no captures either scheme, default https", host)
+    return "https"
+
+
 def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500, collapse_digits: int = 8) -> list[dict]:
     key = f"{url}|{from_year}|{to_year}|{limit}|{collapse_digits}"
     now = time.time()

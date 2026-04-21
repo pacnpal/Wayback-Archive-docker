@@ -292,6 +292,32 @@ def enqueue(target_url: str, timestamp: Optional[str], flags: dict, schedule_id:
     return jid
 
 
+def _infer_archive_scheme(c: sqlite3.Connection, host: str, timestamp: str) -> str:
+    """Derive the scheme (``http://`` or ``https://``) from the most
+    recent non-repair archive job for ``(host, timestamp)``. Pre-HTTPS-era
+    sites (1990s/early-2000s) only have ``http://`` captures in CDX, so
+    hardcoding ``https://`` here used to make repair jobs silently miss
+    every alt-timestamp lookup and mark everything unrecoverable.
+
+    Falls back to ``https://`` only when no parent archive exists — the
+    caller is on their own for that case, and it's a reasonable modern
+    default. Repair jobs created during the same transaction as a parent
+    archive job (the auto-repair path) always find the parent.
+    """
+    from urllib.parse import urlparse
+    row = c.execute(
+        "SELECT target_url FROM jobs "
+        "WHERE host=? AND timestamp=? AND repair_paths_json IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (host, timestamp),
+    ).fetchone()
+    if row and row["target_url"]:
+        scheme = urlparse(row["target_url"]).scheme
+        if scheme in ("http", "https"):
+            return scheme + "://"
+    return "https://"
+
+
 def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optional[dict] = None) -> int:
     """Queue a repair job that re-fetches specific missing rel paths for an
     existing snapshot (host/timestamp). If an identical repair job is already
@@ -308,13 +334,15 @@ def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optio
             "ORDER BY id DESC LIMIT 1",
             (host, timestamp),
         ).fetchone()
-    if dup:
-        logger.info("enqueue repair dedup host=%s ts=%s existing_job=%d",
-                    host, timestamp, dup["id"])
-        return dup["id"]
+        if dup:
+            logger.info("enqueue repair dedup host=%s ts=%s existing_job=%d",
+                        host, timestamp, dup["id"])
+            return dup["id"]
+        scheme = _infer_archive_scheme(c, host, timestamp)
     site_dir = str(OUTPUT_ROOT / host / timestamp)
     log_path = str(Path(site_dir) / ".log")
-    wb = f"https://web.archive.org/web/{timestamp}/https://{host}/"
+    wb = f"https://web.archive.org/web/{timestamp}/{scheme}{host}/"
+    target_url = f"{scheme}{host}/"
     flags = flags or {}
     with connect() as c:
         cur = c.execute(
@@ -322,7 +350,7 @@ def enqueue_repair(host: str, timestamp: str, rel_paths: list[str], flags: Optio
                (target_url, timestamp, wayback_url, host, site_dir, log_path,
                 flags_json, status, created_at, repair_paths_json)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
-            (f"https://{host}/", timestamp, wb, host, site_dir, log_path,
+            (target_url, timestamp, wb, host, site_dir, log_path,
              _json.dumps(flags), now_iso(), _json.dumps(rel_paths)),
         )
         jid = cur.lastrowid

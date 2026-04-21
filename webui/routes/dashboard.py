@@ -260,7 +260,17 @@ async def create_bulk(request: Request):
     if not target:
         raise HTTPException(400, "target_url required")
     if "://" not in target:
-        target = "https://" + target
+        # Don't blindly prepend https://: pre-HTTPS-era sites have
+        # only http:// captures in CDX, and downstream alt-timestamp
+        # lookups miss every match when the scheme is wrong. Probe
+        # CDX once for this host and use the scheme that actually
+        # has captures. Result is cached in wayback.list_snapshots
+        # for subsequent calls with the same URL.
+        try:
+            scheme = wayback.probe_scheme(target)
+        except wayback.WaybackUnreachable as e:
+            raise HTTPException(502, f"CDX error: {e}")
+        target = f"{scheme}://{target}"
     gran = form.get("granularity", "year")
     digits = GRANULARITY.get(gran, 4)
     fy = form.get("from_year")
@@ -298,7 +308,12 @@ async def create_job(request: Request):
     if not target:
         raise HTTPException(400, "target_url required")
     if "://" not in target:
-        target = "https://" + target
+        # Don't blindly prepend https://: see create_bulk for why.
+        try:
+            scheme = wayback.probe_scheme(target)
+        except wayback.WaybackUnreachable as e:
+            raise HTTPException(502, f"CDX error: {e}")
+        target = f"{scheme}://{target}"
     ts = (form.get("timestamp") or "").strip() or None
     flags = _collect_flags(form)
     try:
