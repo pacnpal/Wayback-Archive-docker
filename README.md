@@ -17,8 +17,16 @@ favicon, SSE-driven live updates, and a resume-aware job queue.
 ## Features
 
 - **Job queue** — parallel archive runs with a global concurrency
-  control (defaults to 3), live `%` progress bar per row, sortable
-  filterable jobs table, bulk-cancel and bulk-delete.
+  control (defaults to 3, hard-capped at 10), live `%` progress bar
+  per row, sortable filterable jobs table, bulk-cancel and
+  bulk-delete.
+- **Rate-limit gate** — a process-wide sliding window caps all CDX
+  traffic at 50 req/min (Internet Archive's ceiling is 60) and
+  installs IA's published exponential hard block on any `429` —
+  1h → 2h → 4h → 8h → … Coordinated across the FastAPI process and
+  every shim subprocess via the dashboard DB so no combination of
+  settings can push past the limit. See
+  [Rate limiting](#rate-limiting).
 - **Sites + Snapshots** — per-host overview showing size / file-count
   / asset-health per snapshot, bulk delete, audit-details view,
   in-place link rewriting for served archives.
@@ -121,7 +129,7 @@ Environment variables set in `docker-compose.yml`:
 | --- | --- | --- |
 | `OUTPUT_DIR` | `/app/output` | Where archived snapshots + the SQLite DB live. Bind-mount this to a host directory. |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` — controls both app logs and uvicorn's access log. |
-| `MAX_CONCURRENT` | `3` | Default parallel-downloads cap; also configurable at runtime via the Dashboard UI. |
+| `MAX_CONCURRENT` | `3` | Default parallel-downloads cap; also configurable at runtime via the Dashboard UI. **Hard-capped at 10** in code — higher values are clamped on read. |
 
 Upstream `wayback_archive` flags (OPTIMIZE_HTML, REMOVE_ADS,
 MAKE_INTERNAL_LINKS_RELATIVE, MAX_FILES, etc.) are chosen per-job from
@@ -129,23 +137,80 @@ the dashboard. See
 [GeiserX/Wayback-Archive](https://github.com/GeiserX/Wayback-Archive)
 for the full list of what they do.
 
+Per-job `FETCH_WORKERS` (asset prefetch threads) is **hard-capped at 8**
+server-side in `_run_one`, so a flag set via the API or a legacy DB
+row cannot raise it above that.
+
+## Rate limiting
+
+Internet Archive's CDX endpoint allows an average of **60 requests per
+minute**. When the limit is exceeded, the server returns `429 Too Many
+Requests`. If the client continues to ignore `429` responses for more
+than a minute, the IP is blocked at the firewall level for **one
+hour**, and **each subsequent violation doubles** the blocking time
+(1h → 2h → 4h → 8h → …). Many third-party download scripts don't
+account for this and get their users banned.
+
+The dashboard handles it automatically:
+
+- **Process-wide sliding-window gate** — all CDX requests go through
+  `webui.rate_limit.acquire()`, which enforces a 50 req/min ceiling
+  (10 req/min safety margin below IA's 60). State is stored in the
+  dashboard SQLite DB with `BEGIN IMMEDIATE` locking, so the FastAPI
+  process and every shim subprocess share one budget. There is no
+  setting that raises the ceiling.
+- **Passive outage detection** — on `429`, the gate installs an
+  exponential hard block (1h, 2h, 4h, 8h, 16h, …, capped at 7 days)
+  and flips the worker's outage state to `down`. In-flight jobs that
+  fail during the block are requeued with escalating backoff. A
+  successful CDX response after the block expires clears it and
+  releases deferred jobs. No heartbeat probe is used — outage state
+  reflects only the outcome of real caller traffic, so the dashboard
+  never contributes its own requests to the budget.
+- **Tier decay** — a clean 24 hours with no `429` resets the tier
+  back to 1 on the next offense, so an overnight IA outage doesn't
+  leave tomorrow's first blip with a multi-day cooldown.
+- **`Retry-After` honored** — if IA sends `Retry-After: N` and `N`
+  is longer than the current tier's wait, the gate honors `N`.
+- **Stern user-facing banner** — when a `429` installs a block, the
+  dashboard shows a live per-second countdown to cooldown clear and
+  blunt copy explaining that each additional `429` doubles the wait.
+  On offense #2+, the banner goes severe-red with explicit "you are
+  making this worse — stop queueing jobs, stop clicking retry, wait
+  for the timer" copy.
+
+**TL;DR**: you cannot, by configuration or UI action, cause this
+dashboard to exceed IA's 60 req/min CDX cap. If IA ever does
+rate-limit you anyway (e.g. because someone else on your IP is
+hammering it), the dashboard goes cleanly quiet until the ban
+expires.
+
 ## Architecture
 
 ```
 ┌───────────── browser ─────────────┐
 │  htmx 4 + hx-sse + preload         │
+│  live countdown in outage banner   │
 └─────────┬─────────────────────────┘
           │  /events (SSE)
           │  /jobs/list (partial, morph)
+          │  /api/wayback-status (banner)
           ▼
 ┌───────────── FastAPI app ──────────┐      ┌── worker loop ──┐
 │  routes/dashboard.py               │      │ spawns          │
 │  routes/sites.py  routes/schedules.│◄────►│  webui.wayback_ │
-│  routes/browser.py                 │      │  resume_shim    │
-│  routes/events.py (SSE fan-out)    │      │    └── calls ──►│──► web.archive.org
-└─────────┬──────────────────────────┘      │  webui.wayback_ │
-          │ SQLite (.dashboard.db)          │  repair_shim    │
-          │ SQLite.WAL                      └─────────────────┘
+│  routes/browser.py                 │      │  resume_shim    │──► web.archive.org
+│  routes/events.py (SSE fan-out)    │      │  webui.wayback_ │   (playback)
+└─────────┬──────────────────────────┘      │  repair_shim    │
+          │                                 └────────┬────────┘
+          │  rate_limit gate (50 req/min CDX)        │
+          │  ┌──── every CDX call ─────────┐         │
+          │◄─┤  webui.rate_limit.acquire()  ├────────┤──► web.archive.org
+          │  │  BEGIN IMMEDIATE on DB       │         │   /cdx/search/cdx
+          │  │  429 → exponential hard block│         │
+          │  └──────────────────────────────┘         │
+          │ SQLite (.dashboard.db)                    │
+          │ SQLite.WAL                                │
           ▼
   /mnt/user/appdata/wayback-archive/
     <host>/
@@ -159,7 +224,14 @@ for the full list of what they do.
 Key modules under `webui/`:
 
 - `jobs.py` — SQLite-backed queue, worker loop, enqueue /
-  enqueue_repair / cancel / delete helpers.
+  enqueue_repair / cancel / delete helpers; clamps `MAX_CONCURRENT`
+  and `FETCH_WORKERS` at their server-side ceilings.
+- `rate_limit.py` — process-wide CDX gate, 429-driven exponential
+  hard block, coordinated across FastAPI + shim subprocesses via the
+  dashboard DB.
+- `wayback_probe.py` — outage-state helpers (`ProbeState`,
+  `is_wayback_up`, `backoff_seconds`). **No active heartbeat** —
+  state is driven passively by `rate_limit` observations.
 - `wayback_resume_shim.py` — wraps upstream CLI, disk-cache hits,
   in-flight-file purge on resume.
 - `wayback_repair_shim.py` — targeted asset refetch with CDX
