@@ -1,16 +1,27 @@
 """On-disk metadata cache for per-host snapshot directories.
 
-CodeQL's path-injection taint tracker only recognizes the
-``resolve() → is_relative_to(base)`` barrier when both operations
-appear in the same scope as the filesystem sink. Helper functions
-that take or return ``Path`` objects break that pattern: the analyzer
-sees tainted data cross the function boundary and re-flags each sink.
+Every public function takes raw ``host`` / ``ts`` strings that came
+from user-controlled request paths. CodeQL's path-injection tracker
+flags ``pathlib.Path.resolve()`` and ``os.scandir`` as sinks whenever
+tainted strings reach them, and it recognizes a *regex fullmatch
+sanitizer on the raw string* as a barrier — before any ``Path``
+operation happens. The post-construction ``is_relative_to(base)``
+check on its own is not a barrier in CodeQL's model because the
+``.resolve()`` call has already "fired" the sink.
 
-Every filesystem operation in this module therefore inlines the
-barrier immediately before the sink — no helper indirection, no
-``Path`` parameters passed between functions. Callers supply raw
-``host`` / ``ts`` strings; each function resolves, checks the
-barrier, then acts. It's repetitive but CodeQL-clean.
+So every entry point here starts with ``_valid_host`` /
+``_valid_ts`` on the raw argument. Both are conservative regex
+fullmatches:
+
+  * host — hostname chars only (``[A-Za-z0-9][A-Za-z0-9.\\-]{0,253}``)
+  * ts   — exactly 14 ASCII digits
+
+Traversal (``..``), slashes, null bytes, CRLF, unicode escapes,
+empty strings — all rejected before the ``Path`` constructor runs.
+A defense-in-depth ``is_relative_to`` check still happens after
+resolve so a symlink pointing outside OUTPUT_ROOT can't sneak a
+valid-looking ``host`` past the regex and then escape via the
+filesystem.
 """
 from __future__ import annotations
 import json
@@ -35,25 +46,31 @@ INDEX_NAME = ".index.json"
 # measurement and never tracked subsequent file additions).
 SNAPSHOT_VERSION = 2
 
+# Conservative fullmatch sanitizers — mirror routes/_validators but
+# return bool instead of raising HTTPException because this module
+# isn't HTTP-aware.
+_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,253}$")
 _TS_RE = re.compile(r"^\d{14}$")
+
+
+def _valid_host(host: str) -> bool:
+    return bool(host) and _HOST_RE.fullmatch(host) is not None
+
+
+def _valid_ts(ts: str) -> bool:
+    return bool(ts) and _TS_RE.fullmatch(ts) is not None
 
 
 def is_snapshot_ts(name: str) -> bool:
     """Snapshot dir names are always `YYYYMMDDHHMMSS` (14 digits).
     Anything else under `<host>/` is archived site content, not a snapshot."""
-    return bool(_TS_RE.match(name))
+    return _valid_ts(name)
 
 
 def _load(host: str) -> dict:
-    # Inline barrier: resolve + is_relative_to in the same scope as the
-    # read sink so CodeQL sees the guard.
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        p = (jobs.OUTPUT_ROOT / host / INDEX_NAME).resolve()
-    except OSError:
+    if not _valid_host(host):
         return {}
-    if not p.is_relative_to(base):
-        return {}
+    p = jobs.OUTPUT_ROOT / host / INDEX_NAME
     if not p.is_file():
         return {}
     try:
@@ -63,38 +80,31 @@ def _load(host: str) -> dict:
 
 
 def _atomic_write(host: str, data: dict) -> None:
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        d = (jobs.OUTPUT_ROOT / host).resolve()
-    except OSError:
+    if not _valid_host(host):
         return
-    if not d.is_relative_to(base):
-        return
+    d = jobs.OUTPUT_ROOT / host
     if not d.is_dir():
         return
-    fd, tmp_raw = tempfile.mkstemp(prefix=".index.", dir=str(d))
-    # mkstemp constructs its own filename from its tainted ``dir=``
-    # input, so re-verify inline before using the returned path as a
-    # write sink.
+    # Belt-and-braces: even with the host sanitizer up front,
+    # re-check the directory resolves inside OUTPUT_ROOT before
+    # mkstemp runs. A symlink'd host dir pointing outside the tree
+    # couldn't pass _valid_host (it would just be a name), but this
+    # covers the pathological case of a manually-created host dir
+    # whose resolve goes elsewhere.
+    base = jobs.OUTPUT_ROOT.resolve()
     try:
-        tmp = Path(tmp_raw).resolve()
+        if not d.resolve().is_relative_to(base):
+            return
     except OSError:
-        os.close(fd)
         return
-    if not tmp.is_relative_to(base):
-        os.close(fd)
-        return
+    fd, tmp_raw = tempfile.mkstemp(prefix=".index.", dir=str(d))
+    tmp_name = os.path.basename(tmp_raw)
+    # mkstemp's prefix= is trusted (we pass a literal); re-derive
+    # the path from the sanitized dir + basename so CodeQL sees the
+    # tmp path as constructed from safe pieces rather than lifted
+    # from mkstemp's tainted dir= output.
+    tmp = d / tmp_name
     target = d / INDEX_NAME
-    # Defense in depth: target is derived from ``d`` which we just
-    # barrier-checked, but compute the check in the same scope as
-    # the ``os.replace`` sink so CodeQL sees it.
-    if not target.resolve().is_relative_to(base):
-        os.close(fd)
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        return
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(data, f)
@@ -110,36 +120,38 @@ def _measure_host_snapshot(host: str, ts: str) -> dict:
     """Walk the snapshot dir for `host/ts`; return {size_bytes, file_count,
     mtime, v}. Empty dict on escape or missing dir. A subdir vanishing
     mid-walk is tolerated — partial counts are returned instead of zero."""
+    if not (_valid_host(host) and _valid_ts(ts)):
+        return {}
     import time as _time
     t0 = _time.monotonic()
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        snapshot_dir = (jobs.OUTPUT_ROOT / host / ts).resolve()
-    except OSError:
-        return {}
-    if not snapshot_dir.is_relative_to(base):
-        return {}
+    snapshot_dir = jobs.OUTPUT_ROOT / host / ts
     if not snapshot_dir.is_dir():
         logger.debug("measure skip (not a dir) dir=%s", snapshot_dir)
         return {}
-    logger.debug("measure start dir=%s", snapshot_dir)
+    # Defense in depth: a host/ts pair that passed the regex
+    # sanitizers could still point at a symlinked dir that escapes
+    # OUTPUT_ROOT if someone hand-crafted the tree. Resolve once and
+    # compare against the resolved root, then treat the resolved path
+    # as the canonical walk root.
+    base = jobs.OUTPUT_ROOT.resolve()
+    try:
+        root = snapshot_dir.resolve()
+    except OSError:
+        return {}
+    if not root.is_relative_to(base):
+        return {}
+    logger.debug("measure start dir=%s", root)
     size = 0
     files = 0
-    stack: list[Path] = [snapshot_dir]
+    stack: list[Path] = [root]
     while stack:
         cur = stack.pop()
-        # Every iteration: re-assert the scanned directory stays
-        # inside OUTPUT_ROOT. Even though we pushed from the tree we
-        # already barrier-checked at entry, a symlink could point
-        # outward and CodeQL doesn't know that.
+        # Don't follow symlinks mid-walk: if os.scandir gets handed a
+        # symlink dir entry it would leave the tree. We push Path
+        # objects built from entry.path (which is under our sanitized
+        # root) and rely on follow_symlinks=False on every entry.
         try:
-            cur_resolved = cur.resolve()
-        except OSError:
-            continue
-        if not cur_resolved.is_relative_to(base):
-            continue
-        try:
-            with os.scandir(str(cur_resolved)) as it:
+            with os.scandir(str(cur)) as it:
                 for entry in it:
                     if entry.is_dir(follow_symlinks=False):
                         stack.append(Path(entry.path))
@@ -152,45 +164,35 @@ def _measure_host_snapshot(host: str, ts: str) -> dict:
         except FileNotFoundError:
             continue
     try:
-        mtime = snapshot_dir.stat().st_mtime
+        mtime = root.stat().st_mtime
         mtime_iso = datetime.fromtimestamp(mtime, tz=timezone.utc).replace(microsecond=0).isoformat()
     except OSError:
         mtime_iso = None
     dur_ms = (_time.monotonic() - t0) * 1000
     logger.debug("measure done dir=%s files=%d size=%d mtime=%s duration=%.1fms",
-                 snapshot_dir, files, size, mtime_iso, dur_ms)
+                 root, files, size, mtime_iso, dur_ms)
     return {"size_bytes": size, "file_count": files, "mtime": mtime_iso,
             "v": SNAPSHOT_VERSION}
 
 
 def _list_snapshot_ts(host: str) -> list[str]:
-    """Enumerate valid snapshot timestamps under ``host``. Barrier is
-    inline so CodeQL sees the check at the iterdir sink."""
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        host_dir = (jobs.OUTPUT_ROOT / host).resolve()
-    except OSError:
+    """Enumerate valid snapshot timestamps under ``host``."""
+    if not _valid_host(host):
         return []
-    if not host_dir.is_relative_to(base):
-        return []
+    host_dir = jobs.OUTPUT_ROOT / host
     if not host_dir.is_dir():
         return []
     out: list[str] = []
     for p in host_dir.iterdir():
-        if p.is_dir() and is_snapshot_ts(p.name):
+        if p.is_dir() and _valid_ts(p.name):
             out.append(p.name)
     return out
 
 
 def _snapshot_mtime_iso(host: str, ts: str) -> Optional[str]:
-    """Barrier-checked mtime lookup for a specific snapshot dir."""
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        sd = (jobs.OUTPUT_ROOT / host / ts).resolve()
-    except OSError:
+    if not (_valid_host(host) and _valid_ts(ts)):
         return None
-    if not sd.is_relative_to(base):
-        return None
+    sd = jobs.OUTPUT_ROOT / host / ts
     try:
         return datetime.fromtimestamp(
             sd.stat().st_mtime, tz=timezone.utc,
@@ -200,28 +202,24 @@ def _snapshot_mtime_iso(host: str, ts: str) -> Optional[str]:
 
 
 def _snapshot_is_dir(host: str, ts: str) -> bool:
-    base = jobs.OUTPUT_ROOT.resolve()
-    try:
-        sd = (jobs.OUTPUT_ROOT / host / ts).resolve()
-    except OSError:
+    if not (_valid_host(host) and _valid_ts(ts)):
         return False
-    if not sd.is_relative_to(base):
-        return False
-    return sd.is_dir()
+    return (jobs.OUTPUT_ROOT / host / ts).is_dir()
 
 
 def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
     """Refresh index entries for `timestamps` (or all snapshots if None)."""
     logger.debug("refresh_index host=%s timestamps=%s",
                  host, timestamps if timestamps else "<all>")
+    if not _valid_host(host):
+        return {}
     snaps = timestamps if timestamps is not None else _list_snapshot_ts(host)
     if timestamps is None and not snaps:
-        # Empty host dir or escape — don't touch the index.
         return {}
     idx = _load(host)
     changed = False
     for ts in snaps:
-        if not _snapshot_is_dir(host, ts):
+        if not _valid_ts(ts) or not _snapshot_is_dir(host, ts):
             if ts in idx:
                 del idx[ts]
                 changed = True
@@ -241,15 +239,12 @@ def refresh_index(host: str, timestamps: Optional[list[str]] = None) -> dict:
 def get_index(host: str) -> dict:
     """Return cached index, lazily refreshing entries whose dir mtime moved
     or whose cache predates SNAPSHOT_VERSION."""
+    if not _valid_host(host):
+        return {}
     on_disk = set(_list_snapshot_ts(host))
-    if not on_disk:
-        # Host dir missing or escape — still return cache contents if
-        # any, minus entries that no longer resolve.
-        idx = _load(host)
-        if not idx:
-            return {}
-    else:
-        idx = _load(host)
+    idx = _load(host)
+    if not on_disk and not idx:
+        return {}
     dirty = False
     # Drop index entries whose dir was removed.
     for ts in list(idx.keys()):
@@ -274,6 +269,8 @@ def get_index(host: str) -> dict:
 
 
 def drop_entry(host: str, timestamp: str) -> None:
+    if not (_valid_host(host) and _valid_ts(timestamp)):
+        return
     idx = _load(host)
     if timestamp in idx:
         del idx[timestamp]
