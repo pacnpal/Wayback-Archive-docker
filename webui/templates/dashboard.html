@@ -18,6 +18,26 @@
 </fieldset>
 
 <h2>New archive job</h2>
+<details style="margin:0 0 1rem">
+  <summary>Cache</summary>
+  <div style="display:flex;align-items:center;gap:.75rem;margin-top:.5rem;flex-wrap:wrap">
+    <button type="button" class="secondary"
+            hx-post="/api/cache/refresh"
+            hx-target="#cache-refresh-result"
+            hx-swap="innerHTML"
+            hx-indicator="#cache-refresh-indicator">
+      Refresh cache
+    </button>
+    <span id="cache-refresh-indicator" class="htmx-indicator"
+          style="font-size:.85rem;color:var(--pico-muted-color)">refreshing…</span>
+    <span id="cache-refresh-result" style="font-size:.85rem"></span>
+    <small style="color:var(--pico-muted-color)">
+      Clears the 10-minute CDX snapshot cache and re-measures every host's
+      on-disk index. Automatic: CDX entries expire after 10 minutes; the
+      sites index refreshes lazily when a snapshot dir's mtime changes.
+    </small>
+  </div>
+</details>
 <form method="post" action="/jobs">
   <label>Target URL
     <input type="text" name="target_url" required placeholder="example.com or https://example.com" id="target_url">

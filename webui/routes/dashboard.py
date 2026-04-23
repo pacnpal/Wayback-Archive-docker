@@ -6,7 +6,7 @@ from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, wayback_probe, rate_limit
+from .. import jobs, wayback, wayback_probe, rate_limit, sites_index as _sites_index, log as _log
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -416,6 +416,31 @@ async def api_wayback_status(request: Request):
         "clear_at_iso": rl_status.get("block_until"),
         "block_tier": rl_status.get("block_tier"),
     })
+
+
+@router.post("/api/cache/refresh", response_class=HTMLResponse)
+async def api_cache_refresh(request: Request):
+    """Clear the in-memory CDX snapshot cache and rebuild every host's
+    on-disk sites-index. Returns an HTMX-friendly HTML fragment so the
+    dashboard can swap in a success notice without a full page reload."""
+    def _pl(n: int, singular: str, plural: str) -> str:
+        return singular if n == 1 else plural
+
+    cdx_cleared = wayback.clear_cache()
+    host_counts = _sites_index.refresh_all_hosts()
+    hosts = len(host_counts)
+    snaps = sum(host_counts.values())
+    _log.get("cache").info(
+        "manual cache refresh: cdx_cleared=%d hosts=%d snapshots=%d",
+        cdx_cleared, hosts, snaps,
+    )
+    return HTMLResponse(
+        f'<span style="color:var(--pico-ins-color)">'
+        f"✓ Cache refreshed — {cdx_cleared} CDX {_pl(cdx_cleared, 'entry', 'entries')} cleared; "
+        f"{hosts} {_pl(hosts, 'host', 'hosts')}, "
+        f"{snaps} {_pl(snaps, 'snapshot', 'snapshots')} re-indexed."
+        f"</span>"
+    )
 
 
 @router.get("/api/snapshots", response_class=HTMLResponse)

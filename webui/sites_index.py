@@ -313,6 +313,32 @@ def get_index(host: str) -> dict:
     return idx
 
 
+def refresh_all_hosts() -> dict[str, int]:
+    """Refresh the on-disk snapshot index for every host dir under OUTPUT_ROOT.
+
+    Iterates all valid host directories, calls :func:`refresh_index` for each,
+    and returns a ``{host: snapshot_count}`` mapping so callers can report
+    how many entries were measured.
+    """
+    root = _root_abs()
+    results: dict[str, int] = {}
+    try:
+        with os.scandir(root) as it:
+            for entry in it:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                m = _HOST_RE.fullmatch(entry.name)
+                if m is None:
+                    continue
+                host = m.group(0)
+                idx = refresh_index(host)
+                results[host] = len(idx)
+    except OSError as exc:
+        logger.warning("refresh_all_hosts failed to scan root %s: %s", root, exc)
+    logger.debug("refresh_all_hosts hosts=%d", len(results))
+    return results
+
+
 def drop_entry(host: str, timestamp: str) -> None:
     if (_HOST_RE.fullmatch(host) is None
             or _TS_RE.fullmatch(timestamp) is None):
