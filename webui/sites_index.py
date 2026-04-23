@@ -333,8 +333,8 @@ def refresh_all_hosts() -> dict[str, int]:
                 host = m.group(0)
                 idx = refresh_index(host)
                 results[host] = len(idx)
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("refresh_all_hosts failed to scan root %s: %s", root, exc)
     logger.debug("refresh_all_hosts hosts=%d", len(results))
     return results
 

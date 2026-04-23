@@ -115,6 +115,10 @@
   .wayback-banner--severe { background: #fee2e2; border-left-color: #991b1b; color: #7f1d1d; }
   .wayback-banner--severe .banner-stern { background: rgba(153, 27, 27, .18); border-left-color: #991b1b; color: #7f1d1d; font-weight: 500; }
   .wayback-banner--severe .banner-countdown strong { color: #991b1b; }
+  /* HTMX indicator: hidden by default, shown during active requests */
+  .htmx-indicator { display: none; }
+  .htmx-request .htmx-indicator { display: inline; }
+  .htmx-request.htmx-indicator { display: inline; }
 </style>
 </head>
 <body hx-sse:connect="/events">

@@ -1,6 +1,7 @@
 """Wayback CDX helpers + URL construction."""
 from __future__ import annotations
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -13,6 +14,7 @@ from . import rate_limit
 logger = _log.get("wayback")
 
 _CACHE: dict[str, tuple[float, list[dict]]] = {}
+_CACHE_LOCK = threading.RLock()
 _TTL = 600
 
 
@@ -23,8 +25,9 @@ def clear_cache() -> int:
     from Wayback on the next request; the normal 10-minute TTL resumes from
     that point.
     """
-    count = len(_CACHE)
-    _CACHE.clear()
+    with _CACHE_LOCK:
+        count = len(_CACHE)
+        _CACHE.clear()
     logger.debug("clear_cache cleared=%d entries", count)
     return count
 
@@ -112,11 +115,13 @@ def probe_scheme(host_or_url: str) -> str:
 def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[int] = None, limit: int = 500, collapse_digits: int = 8) -> list[dict]:
     key = f"{url}|{from_year}|{to_year}|{limit}|{collapse_digits}"
     now = time.time()
-    if key in _CACHE and now - _CACHE[key][0] < _TTL:
-        age = now - _CACHE[key][0]
+    with _CACHE_LOCK:
+        cached = _CACHE.get(key)
+    if cached and now - cached[0] < _TTL:
+        age = now - cached[0]
         logger.debug("cdx CACHE HIT url=%s age=%.1fs rows=%d ttl=%ds",
-                     url, age, len(_CACHE[key][1]), _TTL)
-        return _CACHE[key][1]
+                     url, age, len(cached[1]), _TTL)
+        return cached[1]
     logger.debug("cdx CACHE MISS url=%s from=%s to=%s limit=%d collapse=%d",
                  url, from_year, to_year, limit, collapse_digits)
 
@@ -192,6 +197,7 @@ def list_snapshots(url: str, from_year: Optional[int] = None, to_year: Optional[
         header = data[0]
         for row in data[1:]:
             out.append(dict(zip(header, row)))
-    _CACHE[key] = (now, out)
+    with _CACHE_LOCK:
+        _CACHE[key] = (now, out)
     logger.debug("cdx cached key=%r rows=%d", key, len(out))
     return out

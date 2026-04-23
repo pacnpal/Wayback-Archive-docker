@@ -6,7 +6,7 @@ from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from .. import jobs, wayback, wayback_probe, rate_limit, sites_index as _sites_index
+from .. import jobs, wayback, wayback_probe, rate_limit, sites_index as _sites_index, log as _log
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
@@ -430,8 +430,7 @@ async def api_cache_refresh(request: Request):
     host_counts = _sites_index.refresh_all_hosts()
     hosts = len(host_counts)
     snaps = sum(host_counts.values())
-    log_mod = __import__("webui.log", fromlist=["get"])
-    log_mod.get("cache").info(
+    _log.get("cache").info(
         "manual cache refresh: cdx_cleared=%d hosts=%d snapshots=%d",
         cdx_cleared, hosts, snaps,
     )
